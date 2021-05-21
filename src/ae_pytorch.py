@@ -11,19 +11,25 @@ from tqdm import tqdm
 from fast_mnist import FastMNIST
 
 
-class BaseAE(nn.Module):
-    def __init__(self, input_dim, latent_dim):
+class Autoencoder(nn.Module):
+    def __init__(self, dims):
+        """
+        Constructor
+        :param dims: (iterable) dimensions of the layers of the encoder (the decoder's ones will be specular)
+        """
         super().__init__()
-        assert input_dim > 0 and latent_dim > 0
-        self.encoder = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(input_dim, latent_dim),
-            nn.ReLU(inplace=True)
-        )
-        self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, input_dim),
-            nn.Sigmoid()
-        )
+        assert all(d > 0 for d in dims) and len(dims) > 0
+        enc_layers = []
+        dec_layers = []
+        for i in range(len(dims) - 1):
+            enc_layers.append(nn.Linear(dims[i], dims[i + 1]))
+            enc_layers.append(nn.ReLU(inplace=True))
+        for i in reversed(range(1, len(dims))):
+            dec_layers.append(nn.Linear(dims[i], dims[i - 1]))
+            dec_layers.append(nn.ReLU(inplace=True))
+        dec_layers[-1] = nn.Sigmoid()
+        self.encoder = nn.Sequential(nn.Flatten(), *enc_layers)
+        self.decoder = nn.Sequential(*dec_layers)
 
     def forward(self, x):
         encoded = self.encoder(x)
@@ -31,7 +37,7 @@ class BaseAE(nn.Module):
         return torch.reshape(decoded, (x.shape[0], x.shape[1], 28, 28))
 
 
-def fit_ae(model, num_epochs, bs, lr, momentum):
+def fit(model, num_epochs, bs, lr, momentum):
     # load the dataset
     mnist_train = FastMNIST(root='../MNIST/', train=True, download=True, transform=transforms.ToTensor())
     mnist_test = FastMNIST(root='../MNIST/', train=False, download=True, transform=transforms.ToTensor())
@@ -74,17 +80,27 @@ def fit_ae(model, num_epochs, bs, lr, momentum):
         last_batch_loss = loss.item()
 
         # validation
-        model.eval()
-        with torch.no_grad():
-            # move data to GPU if possible -> commented because whole dataset already in GPU
-            # val_batch = val_batch.to(device)
-            # compute net's output
-            outputs = model(mnist_test.data)
-            # compute loss
-            loss = criterion(outputs, mnist_test.data)
-        # update progress bar
-        progbar.set_postfix(train_loss=f"{last_batch_loss:.4f}", val_loss=f"{loss.item():.4f}")
+        val_loss = evaluate(model=model, data=mnist_test.data, criterion=criterion)
+        progbar.set_postfix(train_loss=f"{last_batch_loss:.4f}", val_loss=f"{val_loss:.4f}")
         progbar.close()
+
+
+def evaluate(model, data, criterion):
+    """
+    Evaluate the model
+    :param model: the PyTorch model to evaluate
+    :param criterion: the criterion to use (loss)
+    :returns: loss
+    """
+    model.eval()
+    with torch.no_grad():
+        # move data to GPU if possible -> commented because whole dataset already in GPU
+        # val_batch = val_batch.to(device)
+        # compute net's output
+        outputs = model(data)
+        # compute loss
+        loss = criterion(outputs, data)
+    return loss.item()
 
 
 if __name__ == '__main__':
@@ -101,12 +117,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # load the model if requested, otherwise create one
-    ae = torch.load(args.model_path) if args.load else BaseAE(28 * 28, 200)
+    ae = torch.load(args.model_path) if args.load else Autoencoder((28 * 28, 200, 100, 50))
 
     # train the model
     if args.train:
         start = time.time()
-        fit_ae(model=ae, num_epochs=args.epochs, bs=args.bs, lr=args.lr, momentum=args.momentum)
+        fit(model=ae, num_epochs=args.epochs, bs=args.bs, lr=args.lr, momentum=args.momentum)
         print(f"Execution time: {time.time() - start}")
 
     # save model
