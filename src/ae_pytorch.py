@@ -45,8 +45,10 @@ def fit(model, mode=None, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
     :param lr: (float) learning rate
     :param momentum: (float) momentum coefficient
     :raises: ValueError
-    :returns:
+    :returns: history -> tr and val loss for each epoch
     """
+    assert 0 < lr < 1 and num_epochs > 0 and bs > 0 and 0 <= momentum < 1
+
     # load the dataset
     mnist_train = FastMNIST(root='../MNIST/', train=True, download=True, transform=transforms.ToTensor())
     mnist_test = FastMNIST(root='../MNIST/', train=False, download=True, transform=transforms.ToTensor())
@@ -68,9 +70,11 @@ def fit(model, mode=None, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
 
     # training cycle
     loss = None     # just to avoid reference before assigment
+    history = {'tr_loss': [], 'val_loss': []}
     for epoch in range(num_epochs):
         # training
         model.train()
+        tr_loss = 0
         n_batches = math.ceil(len(mnist_train.data) / bs)
         progbar = tqdm(range(n_batches), total=n_batches)
         progbar.set_description(f"Epoch [{epoch + 1}/{num_epochs}]")
@@ -85,6 +89,7 @@ def fit(model, mode=None, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
             outputs = model(train_batch)
             # compute loss
             loss = criterion(outputs, train_batch)
+            tr_loss += loss.item()
             # propagate back the loss
             loss.backward()
             optimizer.step()
@@ -92,11 +97,22 @@ def fit(model, mode=None, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
             progbar.update()
             progbar.set_postfix(train_loss=f"{loss.item():.4f}")
         last_batch_loss = loss.item()
+        tr_loss /= n_batches
+        history['tr_loss'].append(round(tr_loss, 5))
 
         # validation
         val_loss = evaluate(model=model, data=mnist_test.data, criterion=criterion)
+        history['val_loss'].append(round(val_loss, 5))
         progbar.set_postfix(train_loss=f"{last_batch_loss:.4f}", val_loss=f"{val_loss:.4f}")
         progbar.close()
+
+        # simple early stopping mechanism
+        if epoch >= 10:
+            last_values = history['val_loss'][-10:]
+            if (abs(last_values[-10] - last_values[-1]) <= 2e-5) or (last_values[-3] < last_values[-2] < last_values[-1]):
+                return history
+
+    return history
 
 
 def evaluate(model, data, criterion):
@@ -132,26 +148,34 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # load the ae if requested, otherwise create one
-    ae = torch.load(args.model_path) if args.load else Autoencoder((28 * 28, 200, 100, 50))
+    ae = torch.load(args.model_path) if args.load else Autoencoder((28 * 28, 100))
 
     # train the ae
     if args.train:
         start = time.time()
-        fit(model=ae, mode=args.mode, num_epochs=args.epochs, bs=args.bs, lr=args.lr, momentum=args.momentum)
-        print(f"Execution time: {time.time() - start}")
+        hist = fit(model=ae, mode=args.mode, num_epochs=args.epochs, bs=args.bs, lr=args.lr, momentum=args.momentum)
+        print(f"Training time: {time.time() - start}")
+        plt.plot(hist['tr_loss'], linestyle='dashed', label='Training loss')
+        plt.plot(hist['val_loss'], linestyle='solid', label='Validation loss')
+        plt.title("Training curve")
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.grid()
+        plt.show()
 
     # save ae
     if args.save:
         torch.save(ae, args.save_path)
 
     # print the first reconstructions
-    mnist_test = datasets.MNIST(root='../MNIST/', train=False, download=True, transform=transforms.ToTensor())
-    test_loader = torch.utils.data.DataLoader(mnist_test)
-    ae = ae.to('cpu')
-    for i, (img, _) in enumerate(test_loader):
-        fig, ax = plt.subplots(1, 2)
-        ax[0].imshow(torch.reshape(img, (28, 28)))
-        ax[1].imshow(torch.reshape(ae(img).data, (28, 28)))
-        plt.show()
-        if i >= 4:
-            break
+    # mnist_test = datasets.MNIST(root='../MNIST/', train=False, download=True, transform=transforms.ToTensor())
+    # test_loader = torch.utils.data.DataLoader(mnist_test)
+    # ae = ae.to('cpu')
+    # for i, (img, _) in enumerate(test_loader):
+    #     fig, ax = plt.subplots(1, 2)
+    #     ax[0].imshow(torch.reshape(img, (28, 28)))
+    #     ax[1].imshow(torch.reshape(ae(img).data, (28, 28)))
+    #     plt.show()
+    #     if i >= 4:
+    #         break
