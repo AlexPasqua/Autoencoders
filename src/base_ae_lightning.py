@@ -59,7 +59,7 @@ if __name__ == '__main__':
     train_loader = DataLoader(mnist_train, batch_size=32, shuffle=True, num_workers=3, pin_memory=True)
     val_loader = DataLoader(mnist_val, batch_size=32, num_workers=3, pin_memory=True)
 
-    # model
+    # ae
     model = LitAutoEncoder(input_dim=28*28, latent_dim=200)
 
     # training

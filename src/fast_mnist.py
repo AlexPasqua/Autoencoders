@@ -22,8 +22,11 @@ class FastMNIST(MNIST):
 
     def __getitem__(self, index):
         """
-        :param index: (int) Index
-        :returns: tuple (image, target) where target is index of the target class.
+        Args:
+            index (int): Index
+
+        Returns:
+            tuple: (image, target) where target is index of the target class.
         """
         img, target = self.data[index], self.targets[index]
         return img, target
