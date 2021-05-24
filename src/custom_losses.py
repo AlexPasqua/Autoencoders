@@ -1,8 +1,6 @@
 import torch
 from torch import Tensor
-import torch.functional as F
 import torch.nn.modules.loss as loss
-from ae_pytorch import Autoencoder
 
 
 class ContrastiveLoss(loss.MSELoss):
@@ -17,7 +15,7 @@ class ContrastiveLoss(loss.MSELoss):
         criterion = ClassOfWhateverLoss()
         loss = criterion(output, target)    # this line always the same regardless of the type on loss
     """
-    def __init__(self, ae: Autoencoder, lambd: float, size_average=None, reduce=None, reduction: str = 'mean') -> None:
+    def __init__(self, ae, lambd: float, size_average=None, reduce=None, reduction: str = 'mean') -> None:
         super(ContrastiveLoss, self).__init__(size_average, reduce, reduction)
         self.ae = ae
         self.lambd = lambd
@@ -26,13 +24,13 @@ class ContrastiveLoss(loss.MSELoss):
         return contractive_loss(input, target, self.lambd, self.ae, self.reduction)
 
 
-def contractive_loss(input, target, lambd, ae: Autoencoder, reduction: str):
+def contractive_loss(input, target, lambd, ae, reduction: str):
     """
     Actual function computing the loss of a contractive autoencoder
     :param input: (Tensor)
     :param target: (Tensor)
     :param lambd: (float) regularization parameter
-    :param ae: (Autoencoder) the model itself, used to get it's weights
+    :param ae: (DeepAutoencoder) the model itself, used to get it's weights
     :param reduction: (str) type of reduction {'mean' | 'sum'}
     :raises: ValueError
     :return: the loss
