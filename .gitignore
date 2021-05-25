@@ -2,3 +2,4 @@ venv/
 .idea/
 MNIST/
 CIFAR10/
+models/
