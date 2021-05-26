@@ -10,7 +10,7 @@ from sklearn.manifold import TSNE
 from torchvision import transforms, datasets
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
-from fast_mnist import FastMNIST
+from custom_mnist import FastMNIST
 from autoencoders import ShallowAutoencoder, mnist_train, mnist_test, device, DeepAutoencoder, evaluate, fit
 from custom_losses import ContrastiveLoss
 
@@ -30,43 +30,47 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # load the ae if requested, otherwise create one
+    noise_const = 0.2
     if args.load:
         ae = torch.load(args.model_path)
     else:
         ae = DeepAutoencoder((784, 500, 200, 100, 50, 20))
         start = time.time()
-        ae.pretrain_layers(num_epochs=1, bs=32, lr=0.3, momentum=0.7)
+        ae.pretrain_layers(mode='denoising', num_epochs=20, bs=32, lr=0.2, momentum=0.7, noise_const=noise_const, patch_width=10)
         loss = evaluate(model=ae, data=mnist_test.data, criterion=nn.MSELoss())
         print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
-        fit(model=ae, num_epochs=5, bs=128, lr=0.5, momentum=0.7)
+        fit(model=ae, mode='denoising', num_epochs=20, bs=128, lr=0.2, momentum=0.7, noise_const=noise_const, patch_width=10)
         loss = evaluate(model=ae, data=mnist_test.data, criterion=nn.MSELoss())
         print(f"Loss after fine tuning: {loss}")
         print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")
         torch.save(ae, "../models/deep_ae_500-200-100-50")
 
-    with torch.no_grad():
-        ae.cpu()
-        encoded = ae.encoder(mnist_test.data.cpu())
-        embedded = TSNE(n_components=2, verbose=1).fit_transform(encoded)
-        print(embedded.shape)
-        plt.figure(figsize=(10, 8))
-        sns.scatterplot(
-            x=embedded[:, 0], y=embedded[:, 1],
-            hue=mnist_test.targets.cpu(),
-            palette=sns.color_palette("hls", 10),
-            legend="full",
-            # alpha=0.3
-        )
-        plt.show()
-
-    # # print the first reconstructions
-    # ae = ae.to('cpu')
-    # ts_data = mnist_test.data.to('cpu')
-    # test_loader = torch.utils.data.DataLoader(ts_data)
-    # for i, img in enumerate(test_loader):
-    #     fig, ax = plt.subplots(1, 2)
-    #     ax[0].imshow(torch.reshape(img, (28, 28)))
-    #     ax[1].imshow(torch.reshape(ae(img).data, (28, 28)))
+    # # t-SNE
+    # with torch.no_grad():
+    #     ae.cpu()
+    #     encoded = ae.encoder(mnist_test.data.cpu() + noise_const * torch.randn(mnist_test.data.shape))
+    #     embedded = TSNE(n_components=2, verbose=1).fit_transform(encoded)
+    #     print(embedded.shape)
+    #     plt.figure(figsize=(10, 8))
+    #     sns.scatterplot(
+    #         x=embedded[:, 0], y=embedded[:, 1],
+    #         hue=mnist_test.targets.cpu(),
+    #         palette=sns.color_palette("hls", 10),
+    #         legend="full",
+    #         # alpha=0.3
+    #     )
     #     plt.show()
-    #     if i >= 4:
-    #         break
+
+    # print the first reconstructions
+    from autoencoders import get_noisy_data
+    ae = ae.to('cpu')
+    _, ts_data = get_noisy_data(patch_width=10)
+    ts_data = ts_data.cpu()
+    test_loader = torch.utils.data.DataLoader(ts_data)
+    for i, img in enumerate(test_loader):
+        fig, ax = plt.subplots(1, 2)
+        ax[0].imshow(torch.reshape(img, (28, 28)))
+        ax[1].imshow(torch.reshape(ae(img).data, (28, 28)))
+        plt.show()
+        if i >= 4:
+            break
