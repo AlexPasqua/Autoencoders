@@ -11,7 +11,7 @@ from torchvision import transforms, datasets
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from custom_mnist import FastMNIST
-from autoencoders import ShallowAutoencoder, mnist_train, mnist_test, device, DeepAutoencoder, evaluate, fit
+from autoencoders import ShallowAutoencoder, device, DeepAutoencoder, evaluate, fit
 from custom_losses import ContrastiveLoss
 
 
@@ -35,12 +35,13 @@ if __name__ == '__main__':
         ae = torch.load(args.model_path)
     else:
         ae = DeepAutoencoder((784, 500, 200, 100, 50, 20))
+        mode = 'denoising'
         start = time.time()
-        ae.pretrain_layers(mode='denoising', num_epochs=20, bs=32, lr=0.2, momentum=0.7, noise_const=noise_const, patch_width=10)
-        loss = evaluate(model=ae, data=mnist_test.data, criterion=nn.MSELoss())
+        ae.pretrain_layers(mode=mode, num_epochs=2, bs=32, lr=0.2, momentum=0.7, noise_const=noise_const, patch_width=10)
+        loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
-        fit(model=ae, mode='denoising', num_epochs=20, bs=128, lr=0.2, momentum=0.7, noise_const=noise_const, patch_width=10)
-        loss = evaluate(model=ae, data=mnist_test.data, criterion=nn.MSELoss())
+        fit(model=ae, mode='denoising', num_epochs=1, bs=128, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=10)
+        loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         print(f"Loss after fine tuning: {loss}")
         print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")
         torch.save(ae, "../models/deep_ae_500-200-100-50")
@@ -62,10 +63,10 @@ if __name__ == '__main__':
     #     plt.show()
 
     # print the first reconstructions
-    from autoencoders import get_noisy_data
+    from autoencoders import get_noisy_sets
     ae = ae.to('cpu')
-    _, ts_data = get_noisy_data(patch_width=10)
-    ts_data = ts_data.cpu()
+    _, ts_data = get_noisy_sets(patch_width=10)
+    ts_data = ts_data.data.cpu()
     test_loader = torch.utils.data.DataLoader(ts_data)
     for i, img in enumerate(test_loader):
         fig, ax = plt.subplots(1, 2)
