@@ -16,6 +16,35 @@ from autoencoders import ShallowAutoencoder, DeepAutoencoder, ShallowConvAutoenc
 from custom_losses import ContrastiveLoss
 from training_utilities import get_clean_sets, get_noisy_sets
 
+
+def tsne(model, n_components=2, noisy=False, save=False, path="../plots/tsne.png", **kwargs):
+    """
+    Compute t-SNE
+    :param model: the model used to encode the data
+    :param n_components: dimensionality of the points in the plot (2D / 3D)
+    :param noisy: if True, encode noisy data
+    :param save: if True, save the plot
+    :param path: if 'save', path where to save the plot
+    """
+    _, mnist_test = get_noisy_sets(**kwargs) if noisy else get_clean_sets()
+    with torch.no_grad():
+        model.cpu()
+        encoded = torch.flatten(model.encoder(mnist_test.data.cpu()), 1)
+        embedded = TSNE(n_components=n_components, verbose=1).fit_transform(encoded)
+        plt.figure(figsize=(10, 8))
+        sns.scatterplot(
+            x=embedded[:, 0], y=embedded[:, 1],
+            hue=mnist_test.labels.cpu(),
+            palette=sns.color_palette("hls", 10),
+            legend="full",
+            # alpha=0.3
+        )
+        if save:
+            plt.savefig(path)
+        else:
+            plt.show()
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Implementation of a basic AE")
     parser.add_argument('--mode', action='store', type=str, help="Modality {basic | contractive}")
@@ -59,23 +88,8 @@ if __name__ == '__main__':
     # fit(model=ae, mode='denoising', patch_width=0, num_epochs=10, bs=64, lr=0.5, momentum=0.7)
     # ae.tr(mode='denoising', patch_width=0, num_epochs=10, bs=64, lr=0.5, momentum=0.7, )
 
-    # # t-SNE
-    # _, mnist_test = get_clean_sets()
-    # # _, mnist_test = get_noisy_sets(patch_width=8)
-    # with torch.no_grad():
-    #     ae.cpu()
-    #     encoded = torch.flatten(ae.encoder(mnist_test.data.cpu()), 1)
-    #     embedded = TSNE(n_components=2, verbose=1).fit_transform(encoded)
-    #     print(embedded.shape)
-    #     plt.figure(figsize=(10, 8))
-    #     sns.scatterplot(
-    #         x=embedded[:, 0], y=embedded[:, 1],
-    #         hue=mnist_test.labels.cpu(),
-    #         palette=sns.color_palette("hls", 10),
-    #         legend="full",
-    #         # alpha=0.3
-    #     )
-    #     plt.show()
+    # t-SNE
+    tsne(model=ae)
 
     # print the first reconstructions
     ae = ae.to('cpu')
