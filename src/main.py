@@ -5,15 +5,16 @@ import math
 import numpy as np
 import torch.nn as nn
 import matplotlib.pyplot as plt
+from torchsummary import summary
 import seaborn as sns
 from sklearn.manifold import TSNE
 from torchvision import transforms, datasets
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from custom_mnist import FastMNIST
-from autoencoders import ShallowAutoencoder, device, DeepAutoencoder, evaluate, fit
+from autoencoders import ShallowAutoencoder, DeepAutoencoder, ShallowConvAutoencoder, DeepConvAutoencoder
 from custom_losses import ContrastiveLoss
-
+from training_utilities import get_clean_sets, get_noisy_sets
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Implementation of a basic AE")
@@ -30,32 +31,46 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # load the ae if requested, otherwise create one
-    noise_const = 0.2
+    noise_const = 0.1
     if args.load:
         ae = torch.load(args.model_path)
     else:
-        ae = DeepAutoencoder((784, 500, 200, 100, 50, 20))
+        ae = DeepConvAutoencoder(dims=(5, 10, 20, 50), kernel_sizes=3)
+        # ae = ShallowConvAutoencoder(channels=1, n_filters=10, kernel_size=3)
+        # ae = DeepAutoencoder(dims=(784, 500, 250, 100, 50, 20))
+
         mode = 'denoising'
         start = time.time()
-        ae.pretrain_layers(mode=mode, num_epochs=2, bs=32, lr=0.2, momentum=0.7, noise_const=noise_const, patch_width=10)
-        loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
-        print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
-        fit(model=ae, mode='denoising', num_epochs=1, bs=128, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=10)
-        loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
-        print(f"Loss after fine tuning: {loss}")
+        # ae.pretrain_layers(mode=mode, num_epochs=1, bs=512, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
+        # summary(ae.cpu(), input_size=(1, 28, 28), device='cpu')
+
+        # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
+        # print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
+        ae.fit(mode=mode, num_epochs=10, bs=10000, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
+        # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
+        # print(f"Loss after fine tuning: {loss}")
         print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")
         torch.save(ae, "../models/deep_ae_500-200-100-50")
 
+    # ae = DeepConvAutoencoder(inp_area=28, dims=(5, 10, 20), kernel_sizes=3)
+    # ae = ShallowConvAutoencoder(channels=1, n_filters=20, kernel_size=3)
+    # summary(ae.to(device), (1, 28, 28), batch_size=5000)
+    # ae.pretrain_layers(mode='denoising', patch_width=0, num_epochs=1, bs=5000, lr=0.5, momentum=0.7)
+    # fit(model=ae, mode='denoising', patch_width=0, num_epochs=10, bs=64, lr=0.5, momentum=0.7)
+    # ae.tr(mode='denoising', patch_width=0, num_epochs=10, bs=64, lr=0.5, momentum=0.7, )
+
     # # t-SNE
+    # _, mnist_test = get_clean_sets()
+    # # _, mnist_test = get_noisy_sets(patch_width=8)
     # with torch.no_grad():
     #     ae.cpu()
-    #     encoded = ae.encoder(mnist_test.data.cpu() + noise_const * torch.randn(mnist_test.data.shape))
+    #     encoded = torch.flatten(ae.encoder(mnist_test.data.cpu()), 1)
     #     embedded = TSNE(n_components=2, verbose=1).fit_transform(encoded)
     #     print(embedded.shape)
     #     plt.figure(figsize=(10, 8))
     #     sns.scatterplot(
     #         x=embedded[:, 0], y=embedded[:, 1],
-    #         hue=mnist_test.targets.cpu(),
+    #         hue=mnist_test.labels.cpu(),
     #         palette=sns.color_palette("hls", 10),
     #         legend="full",
     #         # alpha=0.3
@@ -63,9 +78,9 @@ if __name__ == '__main__':
     #     plt.show()
 
     # print the first reconstructions
-    from autoencoders import get_noisy_sets
     ae = ae.to('cpu')
-    _, ts_data = get_noisy_sets(patch_width=10)
+    _, ts_data = get_noisy_sets(patch_width=0)
+    # _, ts_data = get_clean_sets()
     ts_data = ts_data.data.cpu()
     test_loader = torch.utils.data.DataLoader(ts_data)
     for i, img in enumerate(test_loader):
