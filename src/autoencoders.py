@@ -36,9 +36,9 @@ class AbstractAutoencoder(nn.Module):
 
     def manifold(self, max_iters=1000, thresh=0.02, side_len=28):
         self.cpu()
-        data, _ = get_clean_sets()
-        # noise_img = data.data[0].cpu() + 0.7 * -1 * torch.randn((1, 1, side_len, side_len)) + 0.5
         noise_img = torch.randn((1, 1, side_len, side_len))
+        noise_img -= torch.min(noise_img)
+        noise_img /= torch.max(noise_img)
         images_progression = [torch.squeeze(noise_img)]
 
         # iterate
@@ -57,8 +57,6 @@ class AbstractAutoencoder(nn.Module):
                 input = output
                 i += 1
 
-        print(len(images_progression))
-
         # show images progression
         img = None
         for i in range(len(images_progression)):
@@ -68,14 +66,6 @@ class AbstractAutoencoder(nn.Module):
                 img.set_data(images_progression[i])
             plt.pause(.1)
             plt.draw()
-
-        #     if i < row_len:
-        #         ax[0, i].imshow(images_progression[i])
-        #         ax[0, i].tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
-        #     else:
-        #         ax[1, i - row_len].imshow(images_progression[i])
-        #         ax[1, i - row_len].tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
-        # fig.show()
 
 
 class ShallowAutoencoder(AbstractAutoencoder):
@@ -185,10 +175,9 @@ class DeepConvAutoencoder(AbstractAutoencoder):
         self.encoder = nn.Sequential(*enc_layers)
 
         # fully connected layers in the center of the autoencoder to reduce dimensionality
-        in_feats = area**2 * dims[-1]
-        out_feats = 10
-        self.enc_linear = nn.Sequential(nn.Flatten(), nn.Linear(in_features=in_feats, out_features=out_feats))
-        self.dec_linear = nn.Linear(in_features=out_feats, out_features=in_feats)
+        fc_dims = (area**2 * dims[-1], area**2 * dims[-1] // 2, 16)
+        self.enc_linear = nn.Sequential(nn.Flatten(), nn.Linear(fc_dims[0], fc_dims[1]), nn.Linear(fc_dims[1], fc_dims[2]))
+        self.dec_linear = nn.Sequential(nn.Linear(fc_dims[2], fc_dims[1]), nn.Linear(fc_dims[1], fc_dims[0]))
 
         # build decoder
         areas = areas[:-1]

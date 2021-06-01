@@ -60,13 +60,15 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # load the ae if requested, otherwise create one
-    noise_const = 0.2
+    noise_const = 0.1
     if args.load:
         ae = torch.load(args.model_path)
+        ae.manifold(max_iters=100, thresh=0.)
+        exit()
     else:
-        ae = DeepConvAutoencoder(dims=(5, 10, 20, 50), kernel_sizes=3)
+        ae = DeepConvAutoencoder(dims=(8, 32, 64), kernel_sizes=3)
         # ae = ShallowConvAutoencoder(channels=1, n_filters=10, kernel_size=3)
-        # ae = DeepAutoencoder(dims=(784, 500, 250, 100, 50))
+        # ae = DeepAutoencoder(dims=(784, 500, 250, 100, 50, 16))
         # ae = ShallowAutoencoder(latent_dim=200)
 
         mode = 'denoising'
@@ -76,14 +78,11 @@ if __name__ == '__main__':
 
         # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         # print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
-        ae.fit(mode=mode, num_epochs=5, bs=32, lr=0.2, momentum=0.7, noise_const=noise_const, patch_width=0)
+        ae.fit(mode=mode, num_epochs=100, bs=512, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
         # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         # print(f"Loss after fine tuning: {loss}")
         print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")
-        torch.save(ae, "../models/conv_ae_5-10-20-50_flat_center")
-
-    ae.manifold(max_iters=50, thresh=0.0)
-    exit()
+        torch.save(ae, "../models/conv_ae_8-32-64_flat_center")
 
     # ae = DeepConvAutoencoder(inp_side_len=28, dims=(5, 10, 20), kernel_sizes=3)
     # ae = ShallowConvAutoencoder(channels=1, n_filters=20, kernel_size=3)
@@ -97,7 +96,7 @@ if __name__ == '__main__':
 
     # print the first reconstructions
     ae = ae.to('cpu')
-    _, ts_data = get_noisy_sets(patch_width=0)
+    _, ts_data = get_noisy_sets(noise_const=noise_const, patch_width=0)
     # _, ts_data = get_clean_sets()
     ts_data = ts_data.data.cpu()
     test_loader = torch.utils.data.DataLoader(ts_data)
