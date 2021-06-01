@@ -64,7 +64,7 @@ if __name__ == '__main__':
     if args.load:
         ae = torch.load(args.model_path)
     else:
-        ae = DeepConvAutoencoder(dims=(5, 10, 20, 50), kernel_sizes=3, pool=False)
+        ae = DeepConvAutoencoder(dims=(5, 10, 20, 50), kernel_sizes=3)
         # ae = ShallowConvAutoencoder(channels=1, n_filters=10, kernel_size=3)
         # ae = DeepAutoencoder(dims=(784, 500, 250, 100, 50))
         # ae = ShallowAutoencoder(latent_dim=200)
@@ -80,12 +80,12 @@ if __name__ == '__main__':
         # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         # print(f"Loss after fine tuning: {loss}")
         print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")
-        torch.save(ae, "../models/ae_200")
+        torch.save(ae, "../models/conv_ae_5-10-20-50_flat_center")
 
-    # ae.manifold(max_iters=50, thresh=0.0)
-    # exit()
+    ae.manifold(max_iters=50, thresh=0.0)
+    exit()
 
-    # ae = DeepConvAutoencoder(inp_area=28, dims=(5, 10, 20), kernel_sizes=3)
+    # ae = DeepConvAutoencoder(inp_side_len=28, dims=(5, 10, 20), kernel_sizes=3)
     # ae = ShallowConvAutoencoder(channels=1, n_filters=20, kernel_size=3)
     # summary(ae.to(device), (1, 28, 28), batch_size=5000)
     # ae.pretrain_layers(mode='denoising', patch_width=0, num_epochs=1, bs=5000, lr=0.5, momentum=0.7)
