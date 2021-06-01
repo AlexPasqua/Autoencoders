@@ -44,7 +44,6 @@ class NoisyMNIST(FastMNIST):
     """ subclass of FastMNIST with data=noisy_data and targets=clean_data (instead of labels) """
     def __init__(self, noise_const=0.1, patch_width=0, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # self.targets = torch.flatten(copy.deepcopy(self.data), 1)
         self.data = self.data + noise_const * torch.randn(self.data.shape).to(device)
         if patch_width > 0:
             for img in self.data:

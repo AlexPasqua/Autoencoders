@@ -60,26 +60,30 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # load the ae if requested, otherwise create one
-    noise_const = 0.1
+    noise_const = 0.2
     if args.load:
         ae = torch.load(args.model_path)
     else:
-        ae = DeepConvAutoencoder(dims=(5, 10, 20, 50), kernel_sizes=3)
+        ae = DeepConvAutoencoder(dims=(5, 10, 20, 50), kernel_sizes=3, pool=False)
         # ae = ShallowConvAutoencoder(channels=1, n_filters=10, kernel_size=3)
-        # ae = DeepAutoencoder(dims=(784, 500, 250, 100, 50, 20))
+        # ae = DeepAutoencoder(dims=(784, 500, 250, 100, 50))
+        # ae = ShallowAutoencoder(latent_dim=200)
 
         mode = 'denoising'
         start = time.time()
-        # ae.pretrain_layers(mode=mode, num_epochs=1, bs=512, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
-        # summary(ae.cpu(), input_size=(1, 28, 28), device='cpu')
+        # ae.pretrain_layers(mode=mode, num_epochs=20, bs=32, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
+        summary(ae.cpu(), input_size=(1, 28, 28), device='cpu')
 
         # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         # print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
-        ae.fit(mode=mode, num_epochs=10, bs=10000, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
+        ae.fit(mode=mode, num_epochs=5, bs=32, lr=0.2, momentum=0.7, noise_const=noise_const, patch_width=0)
         # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         # print(f"Loss after fine tuning: {loss}")
         print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")
-        torch.save(ae, "../models/deep_ae_500-200-100-50")
+        torch.save(ae, "../models/ae_200")
+
+    # ae.manifold(max_iters=50, thresh=0.0)
+    # exit()
 
     # ae = DeepConvAutoencoder(inp_area=28, dims=(5, 10, 20), kernel_sizes=3)
     # ae = ShallowConvAutoencoder(channels=1, n_filters=20, kernel_size=3)
@@ -89,7 +93,7 @@ if __name__ == '__main__':
     # ae.tr(mode='denoising', patch_width=0, num_epochs=10, bs=64, lr=0.5, momentum=0.7, )
 
     # t-SNE
-    tsne(model=ae)
+    # tsne(model=ae)
 
     # print the first reconstructions
     ae = ae.to('cpu')

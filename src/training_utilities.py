@@ -68,8 +68,11 @@ def fit_ae(model, mode=None, tr_data=None, val_data=None, num_epochs=10, bs=32, 
             val_targets = torch.flatten(copy.deepcopy(val_data), start_dim=1)
         del tr_set, val_set
     if 'ConvAutoencoder' in model.__class__.__name__:
+        val_bs = bs
         tr_data, tr_targets = tr_data.cpu(), tr_targets.cpu()
         val_data, val_targets = val_data.cpu(), val_targets.cpu()
+    else:
+        val_bs = None
     torch.cuda.empty_cache()
 
     # training cycle
@@ -107,7 +110,7 @@ def fit_ae(model, mode=None, tr_data=None, val_data=None, num_epochs=10, bs=32, 
         history['tr_loss'].append(round(tr_loss, 5))
 
         # validation
-        val_loss = evaluate(model=model, data=val_data, targets=val_targets, criterion=criterion)
+        val_loss = evaluate(model=model, data=val_data, targets=val_targets, criterion=criterion, bs=val_bs)
         history['val_loss'].append(round(val_loss, 5))
         torch.cuda.empty_cache()
         progbar.set_postfix(train_loss=f"{last_batch_loss:.4f}", val_loss=f"{val_loss:.4f}")
@@ -122,19 +125,30 @@ def fit_ae(model, mode=None, tr_data=None, val_data=None, num_epochs=10, bs=32, 
     return history
 
 
-def evaluate(model, criterion, mode='basic', data=None, targets=None, **kwargs):
+def evaluate(model, criterion, mode='basic', data=None, targets=None, bs=None, **kwargs):
     # set the data
     if data is None:
         _, val_set = get_noisy_sets(**kwargs) if mode == 'denoising' else get_clean_sets()
         data, targets = val_set.data, val_set.targets
+    bs = len(data) if bs is None else bs
+    n_batches = math.ceil(len(data) / bs)
+    if 'ConvAutoencoder' in model.__class__.__name__:
+        data = data.to('cpu')
+        targets = targets.to('cpu')
+    else:
+        data = data.to(device)
+        targets = targets.to(device)
 
     # evaluate
     model.to(device)
-    data = data.to(device)
-    targets = targets.to(device)
     model.eval()
     with torch.no_grad():
-        outputs = model(data)
-        # flatten outputs in case of ConvAE (targets already flat)
-        loss = criterion(torch.flatten(outputs, 1), targets)
-    return loss.item()
+        val_loss = 0
+        for batch_idx in range(n_batches):
+            data_batch = data[batch_idx * bs: batch_idx * bs + bs].to(device)
+            targets_batch = targets[batch_idx * bs: batch_idx * bs + bs].to(device)
+            outputs = model(data_batch)
+            # flatten outputs in case of ConvAE (targets already flat)
+            loss = criterion(torch.flatten(outputs, 1), targets_batch)
+            val_loss += loss.item()
+    return val_loss / n_batches

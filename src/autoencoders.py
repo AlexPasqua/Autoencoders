@@ -1,7 +1,9 @@
 import copy
 import math
+from abc import abstractmethod
 
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -16,12 +18,12 @@ from custom_losses import ContrastiveLoss
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
-class ShallowAutoencoder(nn.Module):
-    def __init__(self, input_dim: int, latent_dim: int):
+class AbstractAutoencoder(nn.Module):
+    @abstractmethod
+    def __init__(self):
         super().__init__()
-        assert input_dim > 0 and latent_dim > 0
-        self.encoder = nn.Sequential(nn.Flatten(), nn.Linear(input_dim, latent_dim), nn.ReLU(inplace=True))
-        self.decoder = nn.Sequential(nn.Linear(latent_dim, input_dim), nn.Sigmoid())
+        self.encoder = None
+        self.decoder = None
 
     def forward(self, x):
         encoded = self.encoder(x)
@@ -32,8 +34,59 @@ class ShallowAutoencoder(nn.Module):
         return fit_ae(model=self, mode=mode, tr_data=tr_data, val_data=val_data, num_epochs=num_epochs, bs=bs, lr=lr,
                       momentum=momentum, **kwargs)
 
+    def manifold(self, max_iters=1000, thresh=0.02, side_len=28):
+        self.cpu()
+        data, _ = get_clean_sets()
+        # noise_img = data.data[0].cpu() + 0.7 * -1 * torch.randn((1, 1, side_len, side_len)) + 0.5
+        noise_img = torch.randn((1, 1, side_len, side_len))
+        images_progression = [torch.squeeze(noise_img)]
 
-class DeepAutoencoder(nn.Module):
+        # iterate
+        i = 0
+        loss = 1000
+        input = noise_img
+        prev_output = None
+        with torch.no_grad():
+            while loss > thresh and i < max_iters:
+                output = self(input)
+                images_progression.append(torch.reshape(torch.squeeze(output) * 255., shape=(side_len, side_len)))
+                if prev_output is not None:
+                    # noinspection PyTypeChecker
+                    loss = F.mse_loss(output, prev_output)
+                prev_output = output
+                input = output
+                i += 1
+
+        print(len(images_progression))
+
+        # show images progression
+        img = None
+        for i in range(len(images_progression)):
+            if img is None:
+                img = plt.imshow(images_progression[0])
+            else:
+                img.set_data(images_progression[i])
+            plt.pause(.1)
+            plt.draw()
+
+        #     if i < row_len:
+        #         ax[0, i].imshow(images_progression[i])
+        #         ax[0, i].tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+        #     else:
+        #         ax[1, i - row_len].imshow(images_progression[i])
+        #         ax[1, i - row_len].tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+        # fig.show()
+
+
+class ShallowAutoencoder(AbstractAutoencoder):
+    def __init__(self, input_dim: int = 784, latent_dim: int = 200):
+        super().__init__()
+        assert input_dim > 0 and latent_dim > 0
+        self.encoder = nn.Sequential(nn.Flatten(), nn.Linear(input_dim, latent_dim), nn.ReLU(inplace=True))
+        self.decoder = nn.Sequential(nn.Linear(latent_dim, input_dim), nn.Sigmoid())
+
+
+class DeepAutoencoder(AbstractAutoencoder):
     def __init__(self, dims: Sequence[int]):
         super().__init__()
         assert len(dims) > 0 and all(d > 0 for d in dims)
@@ -41,6 +94,7 @@ class DeepAutoencoder(nn.Module):
         dec_layers = []
         for i in range(len(dims) - 1):
             enc_layers.append(nn.Linear(dims[i], dims[i + 1]))
+            # enc_layers.append(nn.ReLU(inplace=True))
             enc_layers.append(nn.ReLU(inplace=True))
         for i in reversed(range(1, len(dims))):
             dec_layers.append(nn.Linear(dims[i], dims[i - 1]))
@@ -48,11 +102,6 @@ class DeepAutoencoder(nn.Module):
         dec_layers[-1] = nn.Sigmoid()
         self.encoder = nn.Sequential(nn.Flatten(), *enc_layers)
         self.decoder = nn.Sequential(*dec_layers)
-
-    def forward(self, x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        return decoded
 
     def pretrain_layers(self, num_epochs, bs, lr, momentum, mode='basic', **kwargs):
         tr_data = None
@@ -76,10 +125,6 @@ class DeepAutoencoder(nn.Module):
                                                                 prev_val_data=val_data)
                 del shallow_ae
 
-    def finetune(self, mode='basic', tr_data=None, val_data=None, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
-        return fit_ae(model=self, mode=mode, tr_data=tr_data, val_data=val_data, num_epochs=num_epochs, bs=bs, lr=lr,
-                      momentum=momentum, **kwargs)
-
     @staticmethod
     def create_next_layer_sets(shallow_ae, prev_tr_data=None, prev_val_data=None, unsqueeze=True):
         train_set, val_set = get_clean_sets()
@@ -94,7 +139,7 @@ class DeepAutoencoder(nn.Module):
 
 
 # noinspection PyTypeChecker
-class ShallowConvAutoencoder(nn.Module):
+class ShallowConvAutoencoder(AbstractAutoencoder):
     def __init__(self, channels: int = 1, n_filters: int = 10, kernel_size: int = 3, inp_area: Union[int, Tuple[int, int]] = 28):
         super().__init__()
         pad = (kernel_size - 1) // 2  # pad to keep the original area after convolution
@@ -106,23 +151,15 @@ class ShallowConvAutoencoder(nn.Module):
         # set kernel size, padding and stride to get the correct output shape
         area = math.floor(inp_area / 2)
         kersize = 2 if area * 2 == inp_area else 3
-
         self.decoder = nn.Sequential(
             nn.ConvTranspose2d(in_channels=n_filters, out_channels=channels, kernel_size=kersize, stride=2, padding=0),
             nn.Sigmoid())
 
-    def forward(self, x):
-        return self.decoder(self.encoder(x))
-
-    def fit(self, mode=None, tr_data=None, val_data=None, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
-        return fit_ae(model=self, mode=mode, tr_data=tr_data, val_data=val_data, num_epochs=num_epochs, bs=bs, lr=lr,
-                      momentum=momentum, **kwargs)
-
 
 # noinspection PyTypeChecker
-class DeepConvAutoencoder(nn.Module):
+class DeepConvAutoencoder(AbstractAutoencoder):
     def __init__(self, inp_area: Union[int, Tuple[int, int]] = 28, dims: Sequence[int] = (5, 10),
-                 kernel_sizes: Union[int, Sequence[int]] = 3):
+                 kernel_sizes: Union[int, Sequence[int]] = 3, pool=True):
         super().__init__()
 
         # initial checks
@@ -141,7 +178,7 @@ class DeepConvAutoencoder(nn.Module):
             enc_layers.append(nn.Conv2d(in_channels=dims[i], out_channels=dims[i + 1], kernel_size=kernel_sizes[i],
                                         padding=pad, stride=1))
             enc_layers.append(nn.ReLU(inplace=True))
-            if (i % step_pool == 0 or i == len(dims) - 1) and area > 3:
+            if pool and (i % step_pool == 0 or i == len(dims) - 1) and area > 3:
                 enc_layers.append(nn.MaxPool2d(kernel_size=2, stride=2, padding=0))
                 area = math.floor(area / 2)
                 areas.append(area)
@@ -161,10 +198,3 @@ class DeepConvAutoencoder(nn.Module):
             dec_layers.append(nn.ReLU(inplace=True))
         dec_layers[-1] = nn.Sigmoid()
         self.decoder = nn.Sequential(*dec_layers)
-
-    def forward(self, x):
-        return self.decoder(self.encoder(x))
-
-    def fit(self, mode='basic', tr_data=None, val_data=None, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
-        return fit_ae(model=self, mode=mode, tr_data=tr_data, val_data=val_data, num_epochs=num_epochs, bs=bs, lr=lr,
-                      momentum=momentum, **kwargs)
