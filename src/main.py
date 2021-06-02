@@ -5,6 +5,9 @@ import math
 import numpy as np
 import torch.nn as nn
 import matplotlib.pyplot as plt
+from torch import optim
+import tensorflow as tf
+from tensorflow.keras.layers import *
 from torchsummary import summary
 import seaborn as sns
 from sklearn.manifold import TSNE
@@ -56,11 +59,19 @@ def classification_test(ae: AbstractAutoencoder, noisy=False, tr_data=None, tr_l
         ts_data, ts_labels = ts_set.data, ts_set.labels
 
     # pass the data through the encoder
-    tr_data = ae.encoder(tr_data)
-    ts_data = ae.encoder(ts_data)
+    tr_data = ae.encoder(tr_data).cpu().detach().numpy()
+    ts_data = ae.encoder(ts_data).cpu().detach().numpy()
+    tr_labels = tf.keras.utils.to_categorical(np.array(tr_labels.cpu()), num_classes=10)
+    ts_labels = tf.keras.utils.to_categorical(np.array(ts_labels.cpu()), num_classes=10)
 
-    # create and train classifier formed by a single softmax layer
-    # classifier = nn.Sequential(nn.Linear())
+    # create and train a classifier made of one softmax layer
+    classifier = tf.keras.Sequential([Dense(input_dim=tr_data.shape[-1], units=10, activation='softmax')])
+    classifier.compile(optimizer='sgd', loss='categorical_crossentropy', metrics='accuracy')
+    classifier.fit(x=tr_data, y=tr_labels, batch_size=32, epochs=10, verbose=0)
+
+    # test the classifier
+    print("Test classifier:")
+    classifier.evaluate(x=ts_data, y=ts_labels, batch_size=len(ts_data))
 
 
 if __name__ == '__main__':
@@ -81,7 +92,8 @@ if __name__ == '__main__':
     noise_const = 0.1
     if args.load:
         ae = torch.load(args.model_path)
-        ae.manifold(max_iters=10, thresh=0.)
+        classification_test(ae)
+        # ae.manifold(max_iters=10, thresh=0.)
         exit()
     else:
         # ae = DeepConvAutoencoder(dims=(8, 32, 64), kernel_sizes=3)
