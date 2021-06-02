@@ -1,8 +1,3 @@
-"""
-The base of this file is taken from GitHub Gist, then I adapted it to my needs.
-Author: Joost van Amersfoort (y0ast)
-link: https://gist.github.com/y0ast/f69966e308e549f013a92dc66debeeb4
-"""
 import copy
 import random
 import torch
@@ -12,6 +7,11 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
 class FastMNIST(MNIST):
+    """
+    The base of this class is taken from GitHub Gist, then I adapted it to my needs.
+    Author: Joost van Amersfoort (y0ast)
+    link: https://gist.github.com/y0ast/f69966e308e549f013a92dc66debeeb4
+    """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 

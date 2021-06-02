@@ -74,11 +74,11 @@ if __name__ == '__main__':
         mode = 'denoising'
         start = time.time()
         # ae.pretrain_layers(mode=mode, num_epochs=20, bs=32, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
-        summary(ae.cpu(), input_size=(1, 28, 28), device='cpu')
+        summary(ae.cpu(), input_size=(1, 28, 28), batch_size=10, device='cpu')
 
         # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         # print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
-        ae.fit(mode=mode, num_epochs=100, bs=512, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
+        ae.fit(mode=mode, num_epochs=10, bs=32, lr=0.1, momentum=0.7, noise_const=noise_const, patch_width=0)
         # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         # print(f"Loss after fine tuning: {loss}")
         print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")

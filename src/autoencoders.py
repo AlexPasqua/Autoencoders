@@ -159,8 +159,8 @@ class DeepConvAutoencoder(AbstractAutoencoder):
 
         # build encoder
         step_pool = 1 if len(dims) < 3 else (2 if len(dims) < 6 else 3)
-        area = inp_side_len
-        areas = [area]
+        side_len = inp_side_len
+        side_lengths = [side_len]
         dims = (1, *dims)
         enc_layers = []
         for i in range(len(dims) - 1):
@@ -168,37 +168,55 @@ class DeepConvAutoencoder(AbstractAutoencoder):
             enc_layers.append(nn.Conv2d(in_channels=dims[i], out_channels=dims[i + 1], kernel_size=kernel_sizes[i],
                                         padding=pad, stride=1))
             enc_layers.append(nn.ReLU(inplace=True))
-            if pool and (i % step_pool == 0 or i == len(dims) - 1) and area > 3:
+            if pool and (i % step_pool == 0 or i == len(dims) - 1) and side_len > 3:
                 enc_layers.append(nn.MaxPool2d(kernel_size=2, stride=2, padding=0))
-                area = math.floor(area / 2)
-                areas.append(area)
-        self.encoder = nn.Sequential(*enc_layers)
+                side_len = math.floor(side_len / 2)
+                side_lengths.append(side_len)
 
         # fully connected layers in the center of the autoencoder to reduce dimensionality
-        fc_dims = (area**2 * dims[-1], area**2 * dims[-1] // 2, 16)
-        self.enc_linear = nn.Sequential(nn.Flatten(), nn.Linear(fc_dims[0], fc_dims[1]), nn.Linear(fc_dims[1], fc_dims[2]))
-        self.dec_linear = nn.Sequential(nn.Linear(fc_dims[2], fc_dims[1]), nn.Linear(fc_dims[1], fc_dims[0]))
+        fc_dims = (side_len**2 * dims[-1], side_len**2 * dims[-1] // 2, 16)
+        self.encoder = nn.Sequential(
+            *enc_layers,
+            nn.Flatten(),
+            nn.Linear(fc_dims[0], fc_dims[1]),
+            nn.Linear(fc_dims[1], fc_dims[2])
+        )
+
+        # self.enc_linear = nn.Sequential(nn.Flatten(), nn.Linear(fc_dims[0], fc_dims[1]), nn.Linear(fc_dims[1], fc_dims[2]))
+        # self.dec_linear = nn.Sequential(nn.Linear(fc_dims[2], fc_dims[1]), nn.Linear(fc_dims[1], fc_dims[0]))
 
         # build decoder
-        areas = areas[:-1]
+        central_side_len = side_lengths.pop(-1)
+        # side_lengths = side_lengths[:-1]
         dec_layers = []
         for i in reversed(range(1, len(dims))):
             # set kernel size, padding and stride to get the correct output shape
-            kersize = 2 if len(areas) > 0 and area * 2 == areas.pop(-1) else 3
-            pad, stride = (1, 1) if area == inp_side_len else (0, 2)
+            kersize = 2 if len(side_lengths) > 0 and side_len * 2 == side_lengths.pop(-1) else 3
+            pad, stride = (1, 1) if side_len == inp_side_len else (0, 2)
             # create transpose convolution layer
             dec_layers.append(nn.ConvTranspose2d(in_channels=dims[i], out_channels=dims[i - 1], kernel_size=kersize,
                                                  padding=pad, stride=stride))
-            area = area if pad == 1 else (area * 2 if kersize == 2 else area * 2 + 1)
+            side_len = side_len if pad == 1 else (side_len * 2 if kersize == 2 else side_len * 2 + 1)
             dec_layers.append(nn.ReLU(inplace=True))
         dec_layers[-1] = nn.Sigmoid()
-        self.decoder = nn.Sequential(*dec_layers)
 
-    def forward(self, x):
-        encoded = self.encoder(x)
-        enc_fc = self.enc_linear(encoded)
-        dec_fc = self.dec_linear(enc_fc)
-        depth, side_len = encoded.shape[1], encoded.shape[-1]
-        dec_conv_input = dec_fc.view(dec_fc.shape[0], depth, side_len, side_len)
-        decoded = self.decoder(dec_conv_input)
-        return decoded
+        self.decoder = nn.Sequential(
+            nn.Linear(fc_dims[2], fc_dims[1]),
+            nn.Linear(fc_dims[1], fc_dims[0]),
+            nn.Unflatten(dim=1, unflattened_size=(dims[-1], central_side_len, central_side_len)),
+            *dec_layers,
+        )
+
+    # def forward(self, x):
+    #     encoded = self.encoder(x)
+    #     decoded = self.decoder(encoded)
+    #     print(decoded.shape)
+    #     exit()
+
+        # encoded = self.encoder(x)
+        # enc_fc = self.enc_linear(encoded)
+        # dec_fc = self.dec_linear(enc_fc)
+        # depth, side_len = encoded.shape[1], encoded.shape[-1]
+        # dec_conv_input = dec_fc.view(dec_fc.shape[0], depth, side_len, side_len)
+        # decoded = self.decoder(dec_conv_input)
+        # return decoded
