@@ -12,7 +12,7 @@ from torchvision import transforms, datasets
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from custom_mnist import FastMNIST
-from autoencoders import ShallowAutoencoder, DeepAutoencoder, ShallowConvAutoencoder, DeepConvAutoencoder
+from autoencoders import ShallowAutoencoder, DeepAutoencoder, ShallowConvAutoencoder, DeepConvAutoencoder, AbstractAutoencoder
 from custom_losses import ContrastiveLoss
 from training_utilities import get_clean_sets, get_noisy_sets
 
@@ -45,6 +45,24 @@ def tsne(model, n_components=2, noisy=False, save=False, path="../plots/tsne.png
             plt.show()
 
 
+def classification_test(ae: AbstractAutoencoder, noisy=False, tr_data=None, tr_labels=None, ts_data=None, ts_labels=None, **kwargs):
+    # initial checks and data set
+    assert (tr_data is None and tr_labels is None) or (tr_data is not None and tr_labels is not None)
+    assert (ts_data is None and ts_labels is None) or (ts_data is not None and ts_labels is not None)
+    tr_set, ts_set = get_noisy_sets(**kwargs) if noisy else get_clean_sets()
+    if tr_data is None:
+        tr_data, tr_labels = tr_set.data, tr_set.labels
+    if ts_data is None:
+        ts_data, ts_labels = ts_set.data, ts_set.labels
+
+    # pass the data through the encoder
+    tr_data = ae.encoder(tr_data)
+    ts_data = ae.encoder(ts_data)
+
+    # create and train classifier formed by a single softmax layer
+    # classifier = nn.Sequential(nn.Linear())
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Implementation of a basic AE")
     parser.add_argument('--mode', action='store', type=str, help="Modality {basic | contractive}")
@@ -66,19 +84,19 @@ if __name__ == '__main__':
         ae.manifold(max_iters=10, thresh=0.)
         exit()
     else:
-        ae = DeepConvAutoencoder(dims=(8, 32, 64), kernel_sizes=3)
+        # ae = DeepConvAutoencoder(dims=(8, 32, 64), kernel_sizes=3)
         # ae = ShallowConvAutoencoder(channels=1, n_filters=10, kernel_size=3)
-        # ae = DeepAutoencoder(dims=(784, 500, 250, 100, 50, 16))
-        # ae = ShallowAutoencoder(latent_dim=200)
+        # ae = DeepAutoencoder(dims=(784, 500, 250))
+        ae = ShallowAutoencoder(latent_dim=200)
 
-        mode = 'denoising'
+        mode = 'basic'
         start = time.time()
         # ae.pretrain_layers(mode=mode, num_epochs=20, bs=32, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
         summary(ae.cpu(), input_size=(1, 28, 28), batch_size=10, device='cpu')
 
         # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         # print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
-        ae.fit(mode=mode, num_epochs=10, bs=32, lr=0.1, momentum=0.7, noise_const=noise_const, patch_width=0)
+        ae.fit(mode=mode, num_epochs=10, bs=32, lr=0.3, momentum=0.7, noise_const=noise_const, patch_width=0)
         # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
         # print(f"Loss after fine tuning: {loss}")
         print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")

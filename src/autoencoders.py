@@ -132,26 +132,33 @@ class DeepAutoencoder(AbstractAutoencoder):
 
 # noinspection PyTypeChecker
 class ShallowConvAutoencoder(AbstractAutoencoder):
-    def __init__(self, channels: int = 1, n_filters: int = 10, kernel_size: int = 3, inp_area: Union[int, Tuple[int, int]] = 28):
+    def __init__(self, channels=1, n_filters=10, kernel_size: int = 3, central_dim=100,
+                 inp_side_len: Union[int, Tuple[int, int]] = 28):
         super().__init__()
         pad = (kernel_size - 1) // 2  # pad to keep the original area after convolution
+        central_side_len = math.floor(inp_side_len / 2)
         self.encoder = nn.Sequential(
             nn.Conv2d(in_channels=channels, out_channels=n_filters, kernel_size=kernel_size, stride=1, padding=pad),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2))
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Flatten(),
+            nn.Linear(in_features=central_side_len**2 * n_filters, out_features=central_dim),
+            nn.ReLU(inplace=True))
 
         # set kernel size, padding and stride to get the correct output shape
-        area = math.floor(inp_area / 2)
-        kersize = 2 if area * 2 == inp_area else 3
+        kersize = 2 if central_side_len * 2 == inp_side_len else 3
         self.decoder = nn.Sequential(
+            nn.Linear(in_features=central_dim, out_features=central_side_len**2 * n_filters),
+            nn.ReLU(inplace=True),
+            nn.Unflatten(dim=1, unflattened_size=(n_filters, central_side_len, central_side_len)),
             nn.ConvTranspose2d(in_channels=n_filters, out_channels=channels, kernel_size=kersize, stride=2, padding=0),
             nn.Sigmoid())
 
 
 # noinspection PyTypeChecker
 class DeepConvAutoencoder(AbstractAutoencoder):
-    def __init__(self, inp_side_len: int = 28, dims: Sequence[int] = (5, 10),
-                 kernel_sizes: Union[int, Sequence[int]] = 3, pool=True):
+    def __init__(self, inp_side_len=28, dims: Sequence[int] = (5, 10),
+                 kernel_sizes: int = 3, central_dim=100, pool=True):
         super().__init__()
 
         # initial checks
@@ -176,12 +183,14 @@ class DeepConvAutoencoder(AbstractAutoencoder):
                 side_lengths.append(side_len)
 
         # fully connected layers in the center of the autoencoder to reduce dimensionality
-        fc_dims = (side_len**2 * dims[-1], side_len**2 * dims[-1] // 2, 16)
+        fc_dims = (side_len**2 * dims[-1], side_len**2 * dims[-1] // 2, central_dim)
         self.encoder = nn.Sequential(
             *enc_layers,
             nn.Flatten(),
             nn.Linear(fc_dims[0], fc_dims[1]),
-            nn.Linear(fc_dims[1], fc_dims[2])
+            nn.ReLU(inplace=True),
+            nn.Linear(fc_dims[1], fc_dims[2]),
+            nn.ReLU(inplace=True)
         )
 
         # self.enc_linear = nn.Sequential(nn.Flatten(), nn.Linear(fc_dims[0], fc_dims[1]), nn.Linear(fc_dims[1], fc_dims[2]))
@@ -204,7 +213,9 @@ class DeepConvAutoencoder(AbstractAutoencoder):
 
         self.decoder = nn.Sequential(
             nn.Linear(fc_dims[2], fc_dims[1]),
+            nn.ReLU(inplace=True),
             nn.Linear(fc_dims[1], fc_dims[0]),
+            nn.ReLU(inplace=True),
             nn.Unflatten(dim=1, unflattened_size=(dims[-1], central_side_len, central_side_len)),
             *dec_layers,
         )
