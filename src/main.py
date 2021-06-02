@@ -63,7 +63,7 @@ if __name__ == '__main__':
     noise_const = 0.1
     if args.load:
         ae = torch.load(args.model_path)
-        ae.manifold(max_iters=100, thresh=0.)
+        ae.manifold(max_iters=10, thresh=0.)
         exit()
     else:
         ae = DeepConvAutoencoder(dims=(8, 32, 64), kernel_sizes=3)

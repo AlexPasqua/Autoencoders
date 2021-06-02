@@ -49,7 +49,9 @@ class AbstractAutoencoder(nn.Module):
         with torch.no_grad():
             while loss > thresh and i < max_iters:
                 output = self(input)
-                images_progression.append(torch.reshape(torch.squeeze(output) * 255., shape=(side_len, side_len)))
+                img = torch.reshape(torch.squeeze(output), shape=(side_len, side_len))
+                rescaled_img = (img - torch.min(img)) / torch.max(img)
+                images_progression.append(rescaled_img)
                 if prev_output is not None:
                     # noinspection PyTypeChecker
                     loss = F.mse_loss(output, prev_output)
@@ -64,7 +66,7 @@ class AbstractAutoencoder(nn.Module):
                 img = plt.imshow(images_progression[0])
             else:
                 img.set_data(images_progression[i])
-            plt.pause(.1)
+            plt.pause(1)
             plt.draw()
 
 
