@@ -1,3 +1,6 @@
+import json
+import pickle
+
 import torch
 import argparse
 import time
@@ -15,7 +18,7 @@ from torchvision import transforms, datasets
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from custom_mnist import FastMNIST
-from autoencoders import ShallowAutoencoder, DeepAutoencoder, ShallowConvAutoencoder, DeepConvAutoencoder, AbstractAutoencoder
+from autoencoders import ShallowAutoencoder, DeepAutoencoder, ShallowConvAutoencoder, DeepConvAutoencoder, AbstractAutoencoder, DeepRandomizedAutoencoder
 from custom_losses import ContrastiveLoss
 from training_utilities import get_clean_sets, get_noisy_sets
 
@@ -88,33 +91,55 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', action='store', type=str, help="Path to the AE's file")
     args = parser.parse_args()
 
+    modes = ('basic', 'denoising')
+    dims_combos = (((4, 8, 16), 200), ((4, 8, 16), 100), ((10, 20, 50), 100), ((4, 4, 2), 200), ((4, 4, 2), 100))
+    combos = ((0.1, 32, 20), (0.1, 32, 100), (0.3, 32, 20), (0.3, 32, 100), (0.5, 512, 100), (0.5, 512, 500), (0.7, 1000, 500))
+    momentum = 0.7
+    for dims, central_dim in dims_combos:
+        for pool in (True, False):
+            ae = DeepConvAutoencoder(dims=dims, central_dim=central_dim)
+            for mode in modes:
+                noise_constants = (0.1, 0.2) if mode == 'denoising' else (0.1,)
+                for noise_const in noise_constants:
+                    for lr, bs, epochs in combos:
+                        path = f"{ae.type}_filts{dims}_central{central_dim}_" + \
+                               (f"pool_{mode}_" if pool else f"{mode}_") + \
+                               (f"{noise_const}_" if mode == 'denoising' else "_") + \
+                               f"lr{lr}_bs{bs}_ep{epochs}"
+                        print(f"Training model: {path}")
+                        hist = ae.fit(mode=mode, num_epochs=epochs, bs=bs, lr=lr, momentum=momentum, noise_const=noise_const, patch_width=8)
+                        torch.save(ae, "../models/deepConvAE/" + path)
+                        with open("../results/deepConvAE/hist_" + path, 'w') as f:
+                            json.dump(hist, f)
+    exit()
+
     # load the ae if requested, otherwise create one
-    noise_const = 0.1
-    if args.load:
-        ae = torch.load(args.model_path)
-        classification_test(ae)
-        # ae.manifold(max_iters=10, thresh=0.)
-        exit()
-    else:
-        # ae = DeepConvAutoencoder(dims=(8, 32, 64), kernel_sizes=3)
-        # ae = ShallowConvAutoencoder(channels=1, n_filters=10, kernel_size=3)
-        # ae = DeepAutoencoder(dims=(784, 500, 250))
-        ae = ShallowAutoencoder(latent_dim=200)
+    # noise_const = 0.1
+    # if args.load:
+    #     ae = torch.load(args.model_path)
+    #     classification_test(ae)
+    #     # ae.manifold(max_iters=10, thresh=0.)
+    #     exit()
+    # else:
+    #     # ae = DeepConvAutoencoder(dims_combos=(8, 32, 64), kernel_sizes=3)
+    #     # ae = ShallowConvAutoencoder(channels=1, n_filters=10, kernel_size=3)
+    #     # ae = DeepAutoencoder(dims_combos=(784, 500, 250))
+    #     ae = ShallowAutoencoder(latent_dim=200)
+    #
+    #     mode = 'basic'
+    #     start = time.time()
+    #     # ae.pretrain_layers(mode=mode, num_epochs=20, bs=32, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
+    #     summary(ae.cpu(), input_size=(1, 28, 28), batch_size=10, device='cpu')
+    #
+    #     # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
+    #     # print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
+    #     ae.fit(mode=mode, num_epochs=10, bs=32, lr=0.3, momentum=0.7, noise_const=noise_const, patch_width=0)
+    #     # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
+    #     # print(f"Loss after fine tuning: {loss}")
+    #     print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")
+    #     torch.save(ae, "../models/conv_ae_8-32-64_flat_center")
 
-        mode = 'basic'
-        start = time.time()
-        # ae.pretrain_layers(mode=mode, num_epochs=20, bs=32, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
-        summary(ae.cpu(), input_size=(1, 28, 28), batch_size=10, device='cpu')
-
-        # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
-        # print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
-        ae.fit(mode=mode, num_epochs=10, bs=32, lr=0.3, momentum=0.7, noise_const=noise_const, patch_width=0)
-        # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
-        # print(f"Loss after fine tuning: {loss}")
-        print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")
-        torch.save(ae, "../models/conv_ae_8-32-64_flat_center")
-
-    # ae = DeepConvAutoencoder(inp_side_len=28, dims=(5, 10, 20), kernel_sizes=3)
+    # ae = DeepConvAutoencoder(inp_side_len=28, dims_combos=(5, 10, 20), kernel_sizes=3)
     # ae = ShallowConvAutoencoder(channels=1, n_filters=20, kernel_size=3)
     # summary(ae.to(device), (1, 28, 28), batch_size=5000)
     # ae.pretrain_layers(mode='denoising', patch_width=0, num_epochs=1, bs=5000, lr=0.5, momentum=0.7)
@@ -126,8 +151,8 @@ if __name__ == '__main__':
 
     # print the first reconstructions
     ae = ae.to('cpu')
-    _, ts_data = get_noisy_sets(noise_const=noise_const, patch_width=0)
-    # _, ts_data = get_clean_sets()
+    # _, ts_data = get_noisy_sets(noise_const=noise_const, patch_width=0)
+    _, ts_data = get_clean_sets()
     ts_data = ts_data.data.cpu()
     test_loader = torch.utils.data.DataLoader(ts_data)
     for i, img in enumerate(test_loader):

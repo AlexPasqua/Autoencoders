@@ -74,6 +74,7 @@ class ShallowAutoencoder(AbstractAutoencoder):
     def __init__(self, input_dim: int = 784, latent_dim: int = 200):
         super().__init__()
         assert input_dim > 0 and latent_dim > 0
+        self.type = "shallowAE"
         self.encoder = nn.Sequential(nn.Flatten(), nn.Linear(input_dim, latent_dim), nn.ReLU(inplace=True))
         self.decoder = nn.Sequential(nn.Linear(latent_dim, input_dim), nn.Sigmoid())
 
@@ -82,6 +83,7 @@ class DeepAutoencoder(AbstractAutoencoder):
     def __init__(self, dims: Sequence[int]):
         super().__init__()
         assert len(dims) > 0 and all(d > 0 for d in dims)
+        self.type = "deepAE"
         enc_layers = []
         dec_layers = []
         for i in range(len(dims) - 1):
@@ -130,11 +132,113 @@ class DeepAutoencoder(AbstractAutoencoder):
         return next_tr_data, next_val_data
 
 
+class DeepRandomizedAutoencoder(nn.Module):
+    def __init__(self, dims: Sequence[int]):
+        super().__init__()
+        assert len(dims) > 0 and all(d > 0 for d in dims)
+        self.type = "deepRandAE"
+        self.shallow_encs_params = nn.ParameterList([
+            nn.Parameter(nn.init.xavier_uniform_(torch.empty(dims[i], dims[i + 1])), requires_grad=False)
+            for i in range(len(dims) - 1)
+        ]).to(device)
+        self.shallow_decs_params = nn.ParameterList([
+            nn.Parameter(nn.init.xavier_uniform_(torch.empty(dims[i], dims[i - 1])), requires_grad=True)
+            for i in reversed(range(1, len(dims)))
+        ]).to(device)
+        self.enc_params = nn.ParameterList([])
+
+    def fit(self, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
+        assert 0 < lr < 1 and num_epochs > 0 and bs > 0 and 0 <= momentum < 1
+
+        tr_set, val_set = get_clean_sets()
+        tr_data, tr_targets = tr_set.data, tr_set.targets
+        val_data, val_targets = val_set.data, val_set.targets
+        del tr_set, val_set
+
+        # train the shallow AEs to have trained weight matrices
+        for i in range(len(self.shallow_encs_params)):
+            enc_w = nn.Parameter(self.shallow_encs_params[i], requires_grad=False)
+            dec_w = nn.Parameter(self.shallow_decs_params[len(self.shallow_decs_params) - 1 - i], requires_grad=True)
+            optimizer = torch.optim.SGD([dec_w], lr=lr, momentum=momentum)
+
+            # training cycle
+            loss = None  # just to avoid reference before assigment
+            n_batches = math.ceil(len(tr_data) / bs)
+            history = {'tr_loss': [], 'val_loss': []}
+            for epoch in range(num_epochs):
+                tr_loss = 0
+                # shuffle
+                indexes = torch.randperm(tr_data.shape[0])
+                tr_data = tr_data[indexes]
+                tr_targets = tr_targets[indexes]
+                progbar = tqdm(range(n_batches), total=n_batches, disable=False)
+                progbar.set_description(f"Epoch [{epoch + 1}/{num_epochs}]")
+                # iterate through batches
+                for batch_idx in range(n_batches):
+                    optimizer.zero_grad()
+                    train_data_batch = tr_data[batch_idx * bs: batch_idx * bs + bs].to(device)
+                    train_targets_batch = tr_targets[batch_idx * bs: batch_idx * bs + bs].to(device)
+                    # forward pass
+                    encoded = F.relu(torch.flatten(train_data_batch, start_dim=1) @ enc_w)
+                    outputs = torch.sigmoid(encoded @ dec_w)
+                    # loss and backward pass
+                    loss = F.mse_loss(torch.flatten(outputs, 1), train_targets_batch)
+                    tr_loss += loss.item()
+                    loss.backward()
+                    # torch.nn.utils.clip_grad_norm_(dec_w, max_norm=1.0)
+                    optimizer.step()
+                    progbar.update()
+                    progbar.set_postfix(train_loss=f"{loss.item():.4f}")
+                last_batch_loss = loss.item()
+                tr_loss /= n_batches
+                history['tr_loss'].append(tr_loss)
+                # validation
+                with torch.no_grad():
+                    outputs = torch.sigmoid(F.relu(torch.flatten(val_data, start_dim=1) @ enc_w) @ dec_w)
+                    loss = F.mse_loss(torch.flatten(outputs, 1), val_targets)
+                    val_loss = loss.item()
+                history['val_loss'].append(val_loss)
+                progbar.set_postfix(train_loss=f"{last_batch_loss:.4f}", val_loss=f"{val_loss:.4f}")
+                progbar.close()
+
+                # simple early stopping mechanism
+                # last = history['val_loss'][-10:]
+                # if epoch >= 10 and (abs(last[-10] - last[-1]) <= 2e-5 or last[-3] < last[-2] < last[-1]):
+                #     break
+
+            # save the trained weights
+            self.shallow_decs_params[len(self.shallow_decs_params) - 1 - i] = dec_w  # should be unnecessary
+            self.enc_params.append(nn.Parameter(dec_w.T))
+            torch.cuda.empty_cache()
+
+            # create datasets for next layer
+            with torch.no_grad():
+                new_tr_data = torch.empty(tr_data.shape[0], enc_w.shape[1])
+                # use minibatches on training data for memory reasons, not so in validation data
+                for batch_idx in range(n_batches):
+                    train_data_batch = tr_data[batch_idx * bs: batch_idx * bs + bs].to(device)
+                    train_data_batch = torch.sigmoid(F.relu(torch.flatten(train_data_batch, start_dim=1) @ enc_w))
+                    new_tr_data[batch_idx * bs: batch_idx * bs + bs] = train_data_batch
+                tr_data = new_tr_data
+                val_data = torch.sigmoid(F.relu(torch.flatten(val_data, start_dim=1) @ enc_w))
+                tr_targets = tr_data
+                val_targets = val_data
+
+    def forward(self, x):
+        x = x.view(1, x.shape[-1] ** 2)
+        for w in self.enc_params:
+            x = F.relu(x @ w)
+        for w in reversed(self.enc_params):
+            x = F.relu(x @ w.T)
+        return torch.sigmoid(x)
+
+
 # noinspection PyTypeChecker
 class ShallowConvAutoencoder(AbstractAutoencoder):
     def __init__(self, channels=1, n_filters=10, kernel_size: int = 3, central_dim=100,
                  inp_side_len: Union[int, Tuple[int, int]] = 28):
         super().__init__()
+        self.type = "shallowConvAE"
         pad = (kernel_size - 1) // 2  # pad to keep the original area after convolution
         central_side_len = math.floor(inp_side_len / 2)
         self.encoder = nn.Sequential(
@@ -142,13 +246,13 @@ class ShallowConvAutoencoder(AbstractAutoencoder):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             nn.Flatten(),
-            nn.Linear(in_features=central_side_len**2 * n_filters, out_features=central_dim),
+            nn.Linear(in_features=central_side_len ** 2 * n_filters, out_features=central_dim),
             nn.ReLU(inplace=True))
 
         # set kernel size, padding and stride to get the correct output shape
         kersize = 2 if central_side_len * 2 == inp_side_len else 3
         self.decoder = nn.Sequential(
-            nn.Linear(in_features=central_dim, out_features=central_side_len**2 * n_filters),
+            nn.Linear(in_features=central_dim, out_features=central_side_len ** 2 * n_filters),
             nn.ReLU(inplace=True),
             nn.Unflatten(dim=1, unflattened_size=(n_filters, central_side_len, central_side_len)),
             nn.ConvTranspose2d(in_channels=n_filters, out_channels=channels, kernel_size=kersize, stride=2, padding=0),
@@ -160,6 +264,7 @@ class DeepConvAutoencoder(AbstractAutoencoder):
     def __init__(self, inp_side_len=28, dims: Sequence[int] = (5, 10),
                  kernel_sizes: int = 3, central_dim=100, pool=True):
         super().__init__()
+        self.type = "deepConvAE"
 
         # initial checks
         if isinstance(kernel_sizes, int):
@@ -183,7 +288,7 @@ class DeepConvAutoencoder(AbstractAutoencoder):
                 side_lengths.append(side_len)
 
         # fully connected layers in the center of the autoencoder to reduce dimensionality
-        fc_dims = (side_len**2 * dims[-1], side_len**2 * dims[-1] // 2, central_dim)
+        fc_dims = (side_len ** 2 * dims[-1], side_len ** 2 * dims[-1] // 2, central_dim)
         self.encoder = nn.Sequential(
             *enc_layers,
             nn.Flatten(),
@@ -226,10 +331,10 @@ class DeepConvAutoencoder(AbstractAutoencoder):
     #     print(decoded.shape)
     #     exit()
 
-        # encoded = self.encoder(x)
-        # enc_fc = self.enc_linear(encoded)
-        # dec_fc = self.dec_linear(enc_fc)
-        # depth, side_len = encoded.shape[1], encoded.shape[-1]
-        # dec_conv_input = dec_fc.view(dec_fc.shape[0], depth, side_len, side_len)
-        # decoded = self.decoder(dec_conv_input)
-        # return decoded
+    # encoded = self.encoder(x)
+    # enc_fc = self.enc_linear(encoded)
+    # dec_fc = self.dec_linear(enc_fc)
+    # depth, side_len = encoded.shape[1], encoded.shape[-1]
+    # dec_conv_input = dec_fc.view(dec_fc.shape[0], depth, side_len, side_len)
+    # decoded = self.decoder(dec_conv_input)
+    # return decoded

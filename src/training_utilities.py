@@ -38,8 +38,8 @@ def get_noisy_sets(**kwargs):
 
 
 def fit_ae(model, mode=None, tr_data=None, val_data=None, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
-    model_values = (None, 'basic', 'contractive', 'denoising')
-    assert 0 < lr < 1 and num_epochs > 0 and bs > 0 and 0 <= momentum < 1 and mode in model_values
+    mode_values = (None, 'basic', 'contractive', 'denoising')
+    assert 0 < lr < 1 and num_epochs > 0 and bs > 0 and 0 <= momentum < 1 and mode in mode_values
 
     # set the device: GPU if cuda is available, else CPU
     model.to(device)
