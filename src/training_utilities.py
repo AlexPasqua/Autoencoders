@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from torchvision import transforms
 from tqdm import tqdm
-from custom_losses import ContrastiveLoss
+from custom_losses import ContractiveLoss
 from custom_mnist import FastMNIST, NoisyMNIST
 
 
@@ -46,7 +46,7 @@ def fit_ae(model, mode=None, tr_data=None, val_data=None, num_epochs=10, bs=32, 
 
     # set optimizer, loss type and datasets (depending on the type of AE)
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
-    criterion = ContrastiveLoss(ae=model, lambd=1e-4) if mode == 'contractive' else nn.MSELoss()
+    criterion = ContractiveLoss(ae=model, lambd=1e-4) if mode == 'contractive' else nn.MSELoss()
     if mode == 'denoising':
         if tr_data is not None or val_data is not None:
             warnings.warn("'denoising' flag was set, so NoisyMNIST will be used for training and validation")

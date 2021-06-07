@@ -1,7 +1,8 @@
 import copy
+import json
 import math
 from abc import abstractmethod
-
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -12,7 +13,7 @@ from torchvision import transforms
 from typing import Sequence, Union, Tuple
 from training_utilities import get_clean_sets, get_noisy_sets, fit_ae
 from custom_mnist import FastMNIST, NoisyMNIST
-from custom_losses import ContrastiveLoss
+from custom_losses import ContractiveLoss
 
 # set device globally
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -34,30 +35,51 @@ class AbstractAutoencoder(nn.Module):
         return fit_ae(model=self, mode=mode, tr_data=tr_data, val_data=val_data, num_epochs=num_epochs, bs=bs, lr=lr,
                       momentum=momentum, **kwargs)
 
-    def manifold(self, max_iters=1000, thresh=0.02, side_len=28):
-        self.cpu()
-        noise_img = torch.randn((1, 1, side_len, side_len))
-        noise_img -= torch.min(noise_img)
-        noise_img /= torch.max(noise_img)
-        images_progression = [torch.squeeze(noise_img)]
+    def manifold(self, load=None, path=None, max_iters=1000, thresh=0.02, side_len=28):
+        if load:
+            images_progression = np.load(path)
+        else:
+            self.cpu()
+            noise_img = torch.randn((1, 1, side_len, side_len))
+            noise_img -= torch.min(noise_img)
+            noise_img /= torch.max(noise_img)
+            images_progression = [torch.squeeze(noise_img)]
+            serializable_progression = [torch.squeeze(noise_img).cpu().numpy()]
 
-        # iterate
-        i = 0
-        loss = 1000
-        input = noise_img
-        prev_output = None
-        with torch.no_grad():
-            while loss > thresh and i < max_iters:
-                output = self(input)
-                img = torch.reshape(torch.squeeze(output), shape=(side_len, side_len))
-                rescaled_img = (img - torch.min(img)) / torch.max(img)
-                images_progression.append(rescaled_img)
-                if prev_output is not None:
-                    # noinspection PyTypeChecker
-                    loss = F.mse_loss(output, prev_output)
-                prev_output = output
-                input = output
-                i += 1
+            # iterate
+            i = 0
+            loss = 1000
+            input = noise_img
+            prev_output = None
+            with torch.no_grad():
+                while loss > thresh and i < max_iters:
+                    output = self(input)
+                    img = torch.reshape(torch.squeeze(output), shape=(side_len, side_len))
+                    rescaled_img = (img - torch.min(img)) / torch.max(img)
+                    images_progression.append(rescaled_img)
+                    serializable_progression.append(rescaled_img.cpu().numpy())
+                    if prev_output is not None:
+                        # noinspection PyTypeChecker
+                        loss = F.mse_loss(output, prev_output)
+                    prev_output = output
+                    input = output
+                    i += 1
+
+            # save sequence of images
+            serializable_progression = np.array(serializable_progression)
+            np.save(file="manifold_img_seq_2", arr=serializable_progression)
+
+        images_progression = images_progression[:60]
+        import matplotlib.cm as cm
+        import matplotlib.animation as animation
+        frames = []  # for storing the generated images
+        fig = plt.figure()
+        for i in range(len(images_progression)):
+            frames.append([plt.imshow(images_progression[i], animated=True)])
+        ani = animation.ArtistAnimation(fig, frames, interval=50, blit=True, repeat_delay=1000)
+        ani.save('movie2.gif')
+        plt.show()
+        exit()
 
         # show images progression
         img = None
@@ -66,7 +88,7 @@ class AbstractAutoencoder(nn.Module):
                 img = plt.imshow(images_progression[0])
             else:
                 img.set_data(images_progression[i])
-            plt.pause(1)
+            plt.pause(.1)
             plt.draw()
 
 
@@ -202,9 +224,9 @@ class DeepRandomizedAutoencoder(nn.Module):
                 progbar.close()
 
                 # simple early stopping mechanism
-                # last = history['val_loss'][-10:]
-                # if epoch >= 10 and (abs(last[-10] - last[-1]) <= 2e-5 or last[-3] < last[-2] < last[-1]):
-                #     break
+                last = history['val_loss'][-10:]
+                if epoch >= 20 and last[-3] < last[-2] < last[-1]:
+                    break
 
             # save the trained weights
             self.shallow_decs_params[len(self.shallow_decs_params) - 1 - i] = dec_w  # should be unnecessary
@@ -224,12 +246,30 @@ class DeepRandomizedAutoencoder(nn.Module):
                 tr_targets = tr_data
                 val_targets = val_data
 
+            # intermediate layers need less epochs -> they don't improve with more
+            num_epochs = num_epochs // 2
+
     def forward(self, x):
-        x = x.view(1, x.shape[-1] ** 2)
+        x = x.view(x.shape[0], x.shape[-1] ** 2)
         for w in self.enc_params:
-            x = F.relu(x @ w)
+            try:
+                x = F.relu(x @ w)
+            except RuntimeError:
+                pass
         for w in reversed(self.enc_params):
-            x = F.relu(x @ w.T)
+            try:
+                x = F.relu(x @ w.T)
+            except RuntimeError:
+                pass
+        return torch.sigmoid(x)
+
+    def encoder(self, x):
+        x = x.view(x.shape[0], x.shape[-1] ** 2)
+        for w in self.enc_params:
+            try:
+                x = F.relu(x @ w)
+            except RuntimeError:
+                pass
         return torch.sigmoid(x)
 
 

@@ -3,9 +3,9 @@ from torch import Tensor
 import torch.nn.modules.loss as loss
 
 
-class ContrastiveLoss(loss.MSELoss):
+class ContractiveLoss(loss.MSELoss):
     """
-    Custom loss for contrastive autoencoders.
+    Custom loss for contractive autoencoders.
 
     note: the superclass is MSELoss, simply because the base class _Loss is protected and it's not a best practice.
           there isn't a real reason between the choice of MSELoss, since the forward method is overridden completely.
@@ -16,7 +16,7 @@ class ContrastiveLoss(loss.MSELoss):
         loss = criterion(output, target)    # this line always the same regardless of the type on loss
     """
     def __init__(self, ae, lambd: float, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(ContrastiveLoss, self).__init__(size_average, reduce, reduction)
+        super(ContractiveLoss, self).__init__(size_average, reduce, reduction)
         self.ae = ae
         self.lambd = lambd
 

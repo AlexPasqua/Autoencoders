@@ -1,4 +1,6 @@
+import copy
 import json
+import os
 import pickle
 
 import torch
@@ -18,8 +20,9 @@ from torchvision import transforms, datasets
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from custom_mnist import FastMNIST
+import torch.nn.functional as F
 from autoencoders import ShallowAutoencoder, DeepAutoencoder, ShallowConvAutoencoder, DeepConvAutoencoder, AbstractAutoencoder, DeepRandomizedAutoencoder
-from custom_losses import ContrastiveLoss
+from custom_losses import ContractiveLoss
 from training_utilities import get_clean_sets, get_noisy_sets
 
 
@@ -45,6 +48,9 @@ def tsne(model, n_components=2, noisy=False, save=False, path="../plots/tsne.png
             legend="full",
             # alpha=0.3
         )
+        plt.tight_layout()
+        # plt.tick_params(labelbottom=False, labelleft=False)
+        plt.axis('off')
         if save:
             plt.savefig(path)
         else:
@@ -62,8 +68,26 @@ def classification_test(ae: AbstractAutoencoder, noisy=False, tr_data=None, tr_l
         ts_data, ts_labels = ts_set.data, ts_set.labels
 
     # pass the data through the encoder
-    tr_data = ae.encoder(tr_data).cpu().detach().numpy()
-    ts_data = ae.encoder(ts_data).cpu().detach().numpy()
+    with torch.no_grad():
+        if 'Conv' in ae.type:
+            bs = 1000
+            n_batches = math.ceil(len(tr_data) / bs)
+            tr_data, ts_data = tr_data.cpu(), ts_data.cpu()
+            new_tr_data = torch.empty(tr_data.shape[0], ae.encoder[-2].weight.shape[0])
+            new_ts_data = torch.empty(ts_data.shape[0], ae.encoder[-2].weight.shape[0])
+            for batch_idx in range(n_batches - 1):
+                train_data_batch = tr_data[batch_idx * bs: batch_idx * bs + bs].to('cuda:0')
+                encoded_batch = ae.encoder(train_data_batch)
+                new_tr_data[batch_idx * bs: batch_idx * bs + bs] = encoded_batch
+                if batch_idx < math.ceil(len(ts_data) / bs):
+                    test_data_batch = ts_data[batch_idx * bs: batch_idx * bs + bs].to('cuda:0')
+                    encoded_batch = ae.encoder(test_data_batch)
+                    new_ts_data[batch_idx * bs: batch_idx * bs + bs] = encoded_batch
+            tr_data = new_tr_data.cpu().numpy()
+            ts_data = new_ts_data.cpu().numpy()
+        else:
+            tr_data = ae.encoder(tr_data).cpu().detach().numpy()
+            ts_data = ae.encoder(ts_data).cpu().detach().numpy()
     tr_labels = tf.keras.utils.to_categorical(np.array(tr_labels.cpu()), num_classes=10)
     ts_labels = tf.keras.utils.to_categorical(np.array(ts_labels.cpu()), num_classes=10)
 
@@ -73,8 +97,7 @@ def classification_test(ae: AbstractAutoencoder, noisy=False, tr_data=None, tr_l
     classifier.fit(x=tr_data, y=tr_labels, batch_size=32, epochs=10, verbose=0)
 
     # test the classifier
-    print("Test classifier:")
-    classifier.evaluate(x=ts_data, y=ts_labels, batch_size=len(ts_data))
+    return classifier.evaluate(x=ts_data, y=ts_labels, batch_size=len(ts_data))
 
 
 if __name__ == '__main__':
@@ -91,74 +114,104 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', action='store', type=str, help="Path to the AE's file")
     args = parser.parse_args()
 
-    modes = ('basic', 'denoising')
-    dims_combos = (((4, 8, 16), 200), ((4, 8, 16), 100), ((10, 20, 50), 100), ((4, 4, 2), 200), ((4, 4, 2), 100))
-    combos = ((0.1, 32, 20), (0.1, 32, 100), (0.3, 32, 20), (0.3, 32, 100), (0.5, 512, 100), (0.5, 512, 500), (0.7, 1000, 500))
-    momentum = 0.7
-    for dims, central_dim in dims_combos:
-        for pool in (True, False):
-            ae = DeepConvAutoencoder(dims=dims, central_dim=central_dim)
-            for mode in modes:
-                noise_constants = (0.1, 0.2) if mode == 'denoising' else (0.1,)
-                for noise_const in noise_constants:
-                    for lr, bs, epochs in combos:
-                        path = f"{ae.type}_filts{dims}_central{central_dim}_" + \
-                               (f"pool_{mode}_" if pool else f"{mode}_") + \
-                               (f"{noise_const}_" if mode == 'denoising' else "_") + \
-                               f"lr{lr}_bs{bs}_ep{epochs}"
-                        print(f"Training model: {path}")
-                        hist = ae.fit(mode=mode, num_epochs=epochs, bs=bs, lr=lr, momentum=momentum, noise_const=noise_const, patch_width=8)
-                        torch.save(ae, "../models/deepConvAE/" + path)
-                        with open("../results/deepConvAE/hist_" + path, 'w') as f:
-                            json.dump(hist, f)
+    # ae = torch.load("../models/deepConvAE/deepConvAE_filts(10, 20, 50)_central100_basic__lr0.1_bs32_ep100")
+    # ae = torch.load("../models/deepAE/deepAE_(784, 500, 200, 100, 10)_basic_lr0.3_bs32_ep100")
+    ae = torch.load("../models/deepAE/deepAE_(784, 500, 200, 100, 10)_contractive_lr0.1_bs32_ep100")
+    ae.manifold(load=True, path="manifold_img_seq.npy", max_iters=100, thresh=0.0)
     exit()
 
-    # load the ae if requested, otherwise create one
-    # noise_const = 0.1
-    # if args.load:
-    #     ae = torch.load(args.model_path)
-    #     classification_test(ae)
-    #     # ae.manifold(max_iters=10, thresh=0.)
-    #     exit()
-    # else:
-    #     # ae = DeepConvAutoencoder(dims_combos=(8, 32, 64), kernel_sizes=3)
-    #     # ae = ShallowConvAutoencoder(channels=1, n_filters=10, kernel_size=3)
-    #     # ae = DeepAutoencoder(dims_combos=(784, 500, 250))
-    #     ae = ShallowAutoencoder(latent_dim=200)
+    # modes = ('basic', 'denoising')
+    # dims_combos = ((784, 500),)
+    # combos = ((0.6, 64, 100),)
+    # momentum = 0.7
+    # for dims in dims_combos:
+    #     ae = DeepRandomizedAutoencoder(dims=dims)
+    #     for lr, bs, epochs in combos:
+    #         path = f"{ae.type}_{dims}_lr{lr}_bs{bs}_ep{epochs}"
+    #         print(f"Training model: {path}")
+    #         hist = ae.fit(num_epochs=epochs, bs=bs, lr=lr, momentum=momentum)
+    #         torch.save(ae, "../models/deepRandAE/" + path)
+    #         with open("../results/deepRandAE/hist_" + path, 'w') as f:
+    #             json.dump(hist, f)
+    # exit()
+
+    # create summary + select best ones for each category
+    # loss_types = {'basic': {}, 'denoising': {}, 'contractive': {}}
+    # results = {'shallowAE': copy.deepcopy(loss_types),
+    #            'deepAE': copy.deepcopy(loss_types),
+    #            'shallowConvAE': copy.deepcopy(loss_types),
+    #            'deepConvAE': copy.deepcopy(loss_types)}
+    # best_for_categ = copy.deepcopy(results)
+    # for model_type in results.keys():
+    # dir_path = "../models/deepRandAE/"
+    # results = {}
+    # best_for_categ = copy.deepcopy(results)
+    # for filename in os.listdir(dir_path):
+    #     ae = torch.load(dir_path + filename)
+    #     _, ts_set = get_clean_sets()
+    #     ts_data, ts_targets = ts_set.data, ts_set.targets
+    #     with torch.no_grad():
+    #         outputs = ae(ts_data)
+    #         loss = F.mse_loss(torch.flatten(outputs, 1), ts_targets)
+    #         results[filename] = loss.item()
     #
-    #     mode = 'basic'
-    #     start = time.time()
-    #     # ae.pretrain_layers(mode=mode, num_epochs=20, bs=32, lr=0.5, momentum=0.7, noise_const=noise_const, patch_width=0)
-    #     summary(ae.cpu(), input_size=(1, 28, 28), batch_size=10, device='cpu')
+    # with open("../results/summary_randAE.json", 'w') as f:
+    #     json.dump(results, f, indent='\t')
     #
-    #     # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
-    #     # print(f"Loss before fine tuning: {loss}\n\nFine tuning:")
-    #     ae.fit(mode=mode, num_epochs=10, bs=32, lr=0.3, momentum=0.7, noise_const=noise_const, patch_width=0)
-    #     # loss = evaluate(model=ae, mode=mode, criterion=nn.MSELoss())
-    #     # print(f"Loss after fine tuning: {loss}")
-    #     print(f"Total training and evaluation time: {round(time.time() - start, 3)}s")
-    #     torch.save(ae, "../models/conv_ae_8-32-64_flat_center")
+    # # for model in results.keys():
+    # best_keys = sorted(results, key=results.get)
+    #
+    # print(best_keys)
+    # exit()
+    #
+    # with open("../results/best_for_categ.json", 'w') as f:
+    #     json.dump(best_for_categ, f, indent='\t')
 
-    # ae = DeepConvAutoencoder(inp_side_len=28, dims_combos=(5, 10, 20), kernel_sizes=3)
-    # ae = ShallowConvAutoencoder(channels=1, n_filters=20, kernel_size=3)
-    # summary(ae.to(device), (1, 28, 28), batch_size=5000)
-    # ae.pretrain_layers(mode='denoising', patch_width=0, num_epochs=1, bs=5000, lr=0.5, momentum=0.7)
-    # fit(model=ae, mode='denoising', patch_width=0, num_epochs=10, bs=64, lr=0.5, momentum=0.7)
-    # ae.tr(mode='denoising', patch_width=0, num_epochs=10, bs=64, lr=0.5, momentum=0.7, )
+    # print the best one for each mode (not conv)
+    # with open("../results/best_for_categ.json", 'r') as f:
+    #     best_for_categ = json.load(f)
+    #     for model_type in ('shallowAE', 'deepAE'):
+    #         for mode in ('basic', 'contractive', 'denoising'):
+    #             print(f"{mode + ' ' + model_type + ':':25s}{next(iter(best_for_categ[model_type][mode]))}")
 
-    # t-SNE
-    # tsne(model=ae)
+    # t-SNE and classification test
+    classif_results = {}
+    paths = (
+        "deepRandAE/deepRandAE_(784, 500)_lr0.6_bs64_ep100",
+    )
+    for filename in paths:
+        ae = torch.load("../models/" + filename)
+        tsne(model=ae, save=True, path="../plots/" + filename.split('/')[1] + '.png')
+        # noisy = True if 'denoising' in filename else False
+        # res = classification_test(ae=ae, noisy=noisy, noise_const=0.1)
+        # classif_results[filename.split('/')[1]] = {'loss': res[0], 'accuracy': res[1]}
 
-    # print the first reconstructions
-    ae = ae.to('cpu')
-    # _, ts_data = get_noisy_sets(noise_const=noise_const, patch_width=0)
-    _, ts_data = get_clean_sets()
-    ts_data = ts_data.data.cpu()
-    test_loader = torch.utils.data.DataLoader(ts_data)
-    for i, img in enumerate(test_loader):
-        fig, ax = plt.subplots(1, 2)
-        ax[0].imshow(torch.reshape(img, (28, 28)))
-        ax[1].imshow(torch.reshape(ae(img).data, (28, 28)))
-        plt.show()
-        if i >= 4:
-            break
+        # print the first reconstructions
+        # ae.cpu()
+        # if noisy:
+        #     _, ts_data = get_noisy_sets(noise_const=0.1, patch_width=0)
+        # else:
+        #     _, ts_data = get_clean_sets()
+        # ts_data = ts_data.data.cpu()
+        # img = ts_data[10]
+        # fig, ax = plt.subplots(1, 2)
+        # ax[0].imshow(torch.squeeze(img))
+        # ax[0].set_title("Original image")
+        # ax[0].tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
+        # ax[1].imshow(torch.reshape(ae(torch.unsqueeze(img, 0)).data, (28, 28)))
+        # ax[1].set_title("Reconstructed image")
+        # ax[1].tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
+        # plt.tight_layout()
+        # plt.show()
+
+        # test_loader = torch.utils.data.DataLoader(ts_data)
+        # for i, img in enumerate(test_loader):
+        #     fig, ax = plt.subplots(1, 2)
+        #     ax[0].imshow(torch.reshape(img, (28, 28)))
+        #     ax[1].imshow(torch.reshape(ae(img).data, (28, 28)))
+        #     plt.show()
+        #     if i >= 4:
+        #         break
+
+    # with open("../results/classification_randAE_5.json", 'w') as f:
+    #     json.dump(classif_results, f, indent='\t')
