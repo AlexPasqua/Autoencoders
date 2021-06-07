@@ -93,26 +93,27 @@ class AbstractAutoencoder(nn.Module):
 
 
 class ShallowAutoencoder(AbstractAutoencoder):
-    def __init__(self, input_dim: int = 784, latent_dim: int = 200):
+    def __init__(self, input_dim: int = 784, latent_dim: int = 200, use_bias=True):
         super().__init__()
         assert input_dim > 0 and latent_dim > 0
         self.type = "shallowAE"
-        self.encoder = nn.Sequential(nn.Flatten(), nn.Linear(input_dim, latent_dim), nn.ReLU(inplace=True))
-        self.decoder = nn.Sequential(nn.Linear(latent_dim, input_dim), nn.Sigmoid())
+        self.encoder = nn.Sequential(nn.Flatten(), nn.Linear(input_dim, latent_dim, bias=use_bias), nn.ReLU(inplace=True))
+        self.decoder = nn.Sequential(nn.Linear(latent_dim, input_dim, bias=use_bias), nn.Sigmoid())
 
 
 class DeepAutoencoder(AbstractAutoencoder):
-    def __init__(self, dims: Sequence[int]):
+    def __init__(self, dims: Sequence[int], use_bias=True):
         super().__init__()
         assert len(dims) > 0 and all(d > 0 for d in dims)
         self.type = "deepAE"
+        self.use_bias = use_bias
         enc_layers = []
         dec_layers = []
         for i in range(len(dims) - 1):
-            enc_layers.append(nn.Linear(dims[i], dims[i + 1]))
+            enc_layers.append(nn.Linear(dims[i], dims[i + 1], bias=use_bias))
             enc_layers.append(nn.ReLU(inplace=True))
         for i in reversed(range(1, len(dims))):
-            dec_layers.append(nn.Linear(dims[i], dims[i - 1]))
+            dec_layers.append(nn.Linear(dims[i], dims[i - 1], bias=use_bias))
             dec_layers.append(nn.ReLU(inplace=True))
         dec_layers[-1] = nn.Sigmoid()
         self.encoder = nn.Sequential(nn.Flatten(), *enc_layers)
@@ -124,20 +125,18 @@ class DeepAutoencoder(AbstractAutoencoder):
         for i, layer in enumerate(self.encoder):
             if isinstance(layer, nn.Linear):
                 print(f"Pretrain layer: {layer}")
-                shallow_ae = ShallowAutoencoder(layer.in_features, layer.out_features)
+                shallow_ae = ShallowAutoencoder(layer.in_features, layer.out_features, use_bias=self.use_bias)
                 if freeze_enc:
                     shallow_ae.encoder[1].weight.requires_grad = False
-                    shallow_ae.encoder[1].bias.requires_grad = False
                 shallow_ae.fit(mode=mode, tr_data=tr_data, val_data=val_data, num_epochs=num_epochs, bs=bs, lr=lr,
                                momentum=momentum, **kwargs)
                 if freeze_enc:
-                    self.encoder[i].weight = nn.Parameter(shallow_ae.decoder[0].weight.T)
-                    self.encoder[i].bias = nn.Parameter(shallow_ae.encoder[1].bias)
-                else:
-                    self.encoder[i].weight = nn.Parameter(shallow_ae.encoder[1].weight)
-                    self.encoder[i].bias = nn.Parameter(shallow_ae.encoder[1].bias)
+                    shallow_ae.encoder[1].weight = nn.Parameter(shallow_ae.decoder[0].weight.T)
+                self.encoder[i].weight = nn.Parameter(shallow_ae.encoder[1].weight)
                 self.decoder[len(self.decoder) - i - 1].weight = nn.Parameter(shallow_ae.decoder[0].weight)
-                self.decoder[len(self.decoder) - i - 1].bias = nn.Parameter(shallow_ae.decoder[0].bias)
+                if self.use_bias:
+                    self.encoder[i].bias = nn.Parameter(shallow_ae.encoder[1].bias)
+                    self.decoder[len(self.decoder) - i - 1].bias = nn.Parameter(shallow_ae.decoder[0].bias)
                 if i == 1 and mode == 'denoising':  # i = 1 --> fist Linear layer
                     tr_set, val_set = get_noisy_sets(**kwargs)
                     tr_data, tr_targets = tr_set.data, tr_set
@@ -147,7 +146,7 @@ class DeepAutoencoder(AbstractAutoencoder):
                                                                 prev_tr_data=tr_data,
                                                                 prev_val_data=val_data)
                 del shallow_ae
-                if num_epochs // 2 > 0:
+                if num_epochs // 2 > 10:
                     num_epochs = num_epochs // 2
 
     @staticmethod
@@ -165,7 +164,7 @@ class DeepAutoencoder(AbstractAutoencoder):
 
 class DeepRandomizedAutoencoder(DeepAutoencoder):
     def __init__(self, dims: Sequence[int]):
-        super().__init__(dims)
+        super().__init__(dims=dims, use_bias=False)
         self.type = "deepRandAE"
 
     def fit(self, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):

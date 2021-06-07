@@ -119,9 +119,9 @@ if __name__ == '__main__':
     # ae = torch.load("../models/deepAE/deepAE_(784, 500, 200, 100, 10)_contractive_lr0.1_bs32_ep100")
     # ae.manifold(load=True, path="manifold_img_seq.npy", max_iters=100, thresh=0.0)
 
-    ae = DeepRandomizedAutoencoder(dims=(784, 500))
-    # ae = ShallowAutoencoder(784, 500)
-    ae.fit(num_epochs=5, bs=128, lr=0.9, momentum=0.9)
+    ae = DeepRandomizedAutoencoder(dims=(784, 100, 100))
+    # ae = DeepAutoencoder((784, 500, 200, 100))
+    ae.fit(num_epochs=30, bs=32, lr=0.4, momentum=0.7)
 
     # modes = ('basic', 'denoising')
     # dims_combos = ((784, 500),)
@@ -197,6 +197,17 @@ if __name__ == '__main__':
         _, ts_data = get_clean_sets()
         ts_data = ts_data.data.cpu()
         img = ts_data[10]
+        fig, ax = plt.subplots(1, 2)
+        ax[0].imshow(torch.squeeze(img))
+        ax[0].set_title("Original image")
+        ax[0].tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
+        ax[1].imshow(torch.reshape(ae(torch.unsqueeze(img, 0)).data, (28, 28)))
+        ax[1].set_title("Reconstructed image")
+        ax[1].tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
+        plt.tight_layout()
+        plt.show()
+
+        img = ts_data[0]
         fig, ax = plt.subplots(1, 2)
         ax[0].imshow(torch.squeeze(img))
         ax[0].set_title("Original image")
