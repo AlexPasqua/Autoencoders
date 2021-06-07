@@ -110,7 +110,6 @@ class DeepAutoencoder(AbstractAutoencoder):
         dec_layers = []
         for i in range(len(dims) - 1):
             enc_layers.append(nn.Linear(dims[i], dims[i + 1]))
-            # enc_layers.append(nn.ReLU(inplace=True))
             enc_layers.append(nn.ReLU(inplace=True))
         for i in reversed(range(1, len(dims))):
             dec_layers.append(nn.Linear(dims[i], dims[i - 1]))
@@ -119,27 +118,37 @@ class DeepAutoencoder(AbstractAutoencoder):
         self.encoder = nn.Sequential(nn.Flatten(), *enc_layers)
         self.decoder = nn.Sequential(*dec_layers)
 
-    def pretrain_layers(self, num_epochs, bs, lr, momentum, mode='basic', **kwargs):
+    def pretrain_layers(self, num_epochs, bs, lr, momentum, mode='basic', freeze_enc=False, **kwargs):
         tr_data = None
         val_data = None
         for i, layer in enumerate(self.encoder):
             if isinstance(layer, nn.Linear):
                 print(f"Pretrain layer: {layer}")
                 shallow_ae = ShallowAutoencoder(layer.in_features, layer.out_features)
+                if freeze_enc:
+                    shallow_ae.encoder[1].weight.requires_grad = False
+                    shallow_ae.encoder[1].bias.requires_grad = False
                 shallow_ae.fit(mode=mode, tr_data=tr_data, val_data=val_data, num_epochs=num_epochs, bs=bs, lr=lr,
                                momentum=momentum, **kwargs)
-                self.encoder[i].weight.data = copy.deepcopy(shallow_ae.encoder[1].weight.data)
-                self.encoder[i].bias.data = copy.deepcopy(shallow_ae.encoder[1].bias.data)
-                self.decoder[len(self.decoder) - i - 1].weight.data = copy.deepcopy(shallow_ae.decoder[0].weight.data)
-                self.decoder[len(self.decoder) - i - 1].bias.data = copy.deepcopy(shallow_ae.decoder[0].bias.data)
+                if freeze_enc:
+                    self.encoder[i].weight = nn.Parameter(shallow_ae.decoder[0].weight.T)
+                    self.encoder[i].bias = nn.Parameter(shallow_ae.encoder[1].bias)
+                else:
+                    self.encoder[i].weight = nn.Parameter(shallow_ae.encoder[1].weight)
+                    self.encoder[i].bias = nn.Parameter(shallow_ae.encoder[1].bias)
+                self.decoder[len(self.decoder) - i - 1].weight = nn.Parameter(shallow_ae.decoder[0].weight)
+                self.decoder[len(self.decoder) - i - 1].bias = nn.Parameter(shallow_ae.decoder[0].bias)
                 if i == 1 and mode == 'denoising':  # i = 1 --> fist Linear layer
                     tr_set, val_set = get_noisy_sets(**kwargs)
                     tr_data, tr_targets = tr_set.data, tr_set
                     val_data, val_targets = val_set.data, val_set.targets
                     mode = 'basic'  # for the pretraining of the deeper layers
-                tr_data, val_data = self.create_next_layer_sets(shallow_ae=shallow_ae, prev_tr_data=tr_data,
+                tr_data, val_data = self.create_next_layer_sets(shallow_ae=shallow_ae,
+                                                                prev_tr_data=tr_data,
                                                                 prev_val_data=val_data)
                 del shallow_ae
+                if num_epochs // 2 > 0:
+                    num_epochs = num_epochs // 2
 
     @staticmethod
     def create_next_layer_sets(shallow_ae, prev_tr_data=None, prev_val_data=None, unsqueeze=True):
@@ -154,123 +163,14 @@ class DeepAutoencoder(AbstractAutoencoder):
         return next_tr_data, next_val_data
 
 
-class DeepRandomizedAutoencoder(nn.Module):
+class DeepRandomizedAutoencoder(DeepAutoencoder):
     def __init__(self, dims: Sequence[int]):
-        super().__init__()
-        assert len(dims) > 0 and all(d > 0 for d in dims)
+        super().__init__(dims)
         self.type = "deepRandAE"
-        self.shallow_encs_params = nn.ParameterList([
-            nn.Parameter(nn.init.xavier_uniform_(torch.empty(dims[i], dims[i + 1])), requires_grad=False)
-            for i in range(len(dims) - 1)
-        ]).to(device)
-        self.shallow_decs_params = nn.ParameterList([
-            nn.Parameter(nn.init.xavier_uniform_(torch.empty(dims[i], dims[i - 1])), requires_grad=True)
-            for i in reversed(range(1, len(dims)))
-        ]).to(device)
-        self.enc_params = nn.ParameterList([])
 
     def fit(self, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
         assert 0 < lr < 1 and num_epochs > 0 and bs > 0 and 0 <= momentum < 1
-
-        tr_set, val_set = get_clean_sets()
-        tr_data, tr_targets = tr_set.data, tr_set.targets
-        val_data, val_targets = val_set.data, val_set.targets
-        del tr_set, val_set
-
-        # train the shallow AEs to have trained weight matrices
-        for i in range(len(self.shallow_encs_params)):
-            enc_w = nn.Parameter(self.shallow_encs_params[i], requires_grad=False)
-            dec_w = nn.Parameter(self.shallow_decs_params[len(self.shallow_decs_params) - 1 - i], requires_grad=True)
-            optimizer = torch.optim.SGD([dec_w], lr=lr, momentum=momentum)
-
-            # training cycle
-            loss = None  # just to avoid reference before assigment
-            n_batches = math.ceil(len(tr_data) / bs)
-            history = {'tr_loss': [], 'val_loss': []}
-            for epoch in range(num_epochs):
-                tr_loss = 0
-                # shuffle
-                indexes = torch.randperm(tr_data.shape[0])
-                tr_data = tr_data[indexes]
-                tr_targets = tr_targets[indexes]
-                progbar = tqdm(range(n_batches), total=n_batches, disable=False)
-                progbar.set_description(f"Epoch [{epoch + 1}/{num_epochs}]")
-                # iterate through batches
-                for batch_idx in range(n_batches):
-                    optimizer.zero_grad()
-                    train_data_batch = tr_data[batch_idx * bs: batch_idx * bs + bs].to(device)
-                    train_targets_batch = tr_targets[batch_idx * bs: batch_idx * bs + bs].to(device)
-                    # forward pass
-                    encoded = F.relu(torch.flatten(train_data_batch, start_dim=1) @ enc_w)
-                    outputs = torch.sigmoid(encoded @ dec_w)
-                    # loss and backward pass
-                    loss = F.mse_loss(torch.flatten(outputs, 1), train_targets_batch)
-                    tr_loss += loss.item()
-                    loss.backward()
-                    # torch.nn.utils.clip_grad_norm_(dec_w, max_norm=1.0)
-                    optimizer.step()
-                    progbar.update()
-                    progbar.set_postfix(train_loss=f"{loss.item():.4f}")
-                last_batch_loss = loss.item()
-                tr_loss /= n_batches
-                history['tr_loss'].append(tr_loss)
-                # validation
-                with torch.no_grad():
-                    outputs = torch.sigmoid(F.relu(torch.flatten(val_data, start_dim=1) @ enc_w) @ dec_w)
-                    loss = F.mse_loss(torch.flatten(outputs, 1), val_targets)
-                    val_loss = loss.item()
-                history['val_loss'].append(val_loss)
-                progbar.set_postfix(train_loss=f"{last_batch_loss:.4f}", val_loss=f"{val_loss:.4f}")
-                progbar.close()
-
-                # simple early stopping mechanism
-                last = history['val_loss'][-10:]
-                if epoch >= 20 and last[-3] < last[-2] < last[-1]:
-                    break
-
-            # save the trained weights
-            self.shallow_decs_params[len(self.shallow_decs_params) - 1 - i] = dec_w  # should be unnecessary
-            self.enc_params.append(nn.Parameter(dec_w.T))
-            torch.cuda.empty_cache()
-
-            # create datasets for next layer
-            with torch.no_grad():
-                new_tr_data = torch.empty(tr_data.shape[0], enc_w.shape[1])
-                # use minibatches on training data for memory reasons, not so in validation data
-                for batch_idx in range(n_batches):
-                    train_data_batch = tr_data[batch_idx * bs: batch_idx * bs + bs].to(device)
-                    train_data_batch = torch.sigmoid(F.relu(torch.flatten(train_data_batch, start_dim=1) @ enc_w))
-                    new_tr_data[batch_idx * bs: batch_idx * bs + bs] = train_data_batch
-                tr_data = new_tr_data
-                val_data = torch.sigmoid(F.relu(torch.flatten(val_data, start_dim=1) @ enc_w))
-                tr_targets = tr_data
-                val_targets = val_data
-
-            # intermediate layers need less epochs -> they don't improve with more
-            num_epochs = num_epochs // 2
-
-    def forward(self, x):
-        x = x.view(x.shape[0], x.shape[-1] ** 2)
-        for w in self.enc_params:
-            try:
-                x = F.relu(x @ w)
-            except RuntimeError:
-                pass
-        for w in reversed(self.enc_params):
-            try:
-                x = F.relu(x @ w.T)
-            except RuntimeError:
-                pass
-        return torch.sigmoid(x)
-
-    def encoder(self, x):
-        x = x.view(x.shape[0], x.shape[-1] ** 2)
-        for w in self.enc_params:
-            try:
-                x = F.relu(x @ w)
-            except RuntimeError:
-                pass
-        return torch.sigmoid(x)
+        self.pretrain_layers(num_epochs=num_epochs, bs=bs, lr=lr, momentum=momentum, freeze_enc=True)
 
 
 # noinspection PyTypeChecker
@@ -338,9 +238,6 @@ class DeepConvAutoencoder(AbstractAutoencoder):
             nn.ReLU(inplace=True)
         )
 
-        # self.enc_linear = nn.Sequential(nn.Flatten(), nn.Linear(fc_dims[0], fc_dims[1]), nn.Linear(fc_dims[1], fc_dims[2]))
-        # self.dec_linear = nn.Sequential(nn.Linear(fc_dims[2], fc_dims[1]), nn.Linear(fc_dims[1], fc_dims[0]))
-
         # build decoder
         central_side_len = side_lengths.pop(-1)
         # side_lengths = side_lengths[:-1]
@@ -364,17 +261,3 @@ class DeepConvAutoencoder(AbstractAutoencoder):
             nn.Unflatten(dim=1, unflattened_size=(dims[-1], central_side_len, central_side_len)),
             *dec_layers,
         )
-
-    # def forward(self, x):
-    #     encoded = self.encoder(x)
-    #     decoded = self.decoder(encoded)
-    #     print(decoded.shape)
-    #     exit()
-
-    # encoded = self.encoder(x)
-    # enc_fc = self.enc_linear(encoded)
-    # dec_fc = self.dec_linear(enc_fc)
-    # depth, side_len = encoded.shape[1], encoded.shape[-1]
-    # dec_conv_input = dec_fc.view(dec_fc.shape[0], depth, side_len, side_len)
-    # decoded = self.decoder(dec_conv_input)
-    # return decoded

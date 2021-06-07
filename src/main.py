@@ -116,9 +116,12 @@ if __name__ == '__main__':
 
     # ae = torch.load("../models/deepConvAE/deepConvAE_filts(10, 20, 50)_central100_basic__lr0.1_bs32_ep100")
     # ae = torch.load("../models/deepAE/deepAE_(784, 500, 200, 100, 10)_basic_lr0.3_bs32_ep100")
-    ae = torch.load("../models/deepAE/deepAE_(784, 500, 200, 100, 10)_contractive_lr0.1_bs32_ep100")
-    ae.manifold(load=True, path="manifold_img_seq.npy", max_iters=100, thresh=0.0)
-    exit()
+    # ae = torch.load("../models/deepAE/deepAE_(784, 500, 200, 100, 10)_contractive_lr0.1_bs32_ep100")
+    # ae.manifold(load=True, path="manifold_img_seq.npy", max_iters=100, thresh=0.0)
+
+    ae = DeepRandomizedAutoencoder(dims=(784, 500))
+    # ae = ShallowAutoencoder(784, 500)
+    ae.fit(num_epochs=5, bs=128, lr=0.9, momentum=0.9)
 
     # modes = ('basic', 'denoising')
     # dims_combos = ((784, 500),)
@@ -175,34 +178,34 @@ if __name__ == '__main__':
     #             print(f"{mode + ' ' + model_type + ':':25s}{next(iter(best_for_categ[model_type][mode]))}")
 
     # t-SNE and classification test
-    classif_results = {}
-    paths = (
-        "deepRandAE/deepRandAE_(784, 500)_lr0.6_bs64_ep100",
-    )
-    for filename in paths:
-        ae = torch.load("../models/" + filename)
-        tsne(model=ae, save=True, path="../plots/" + filename.split('/')[1] + '.png')
+    # classif_results = {}
+    # paths = (
+    #     "deepRandAE/deepRandAE_(784, 500)_lr0.6_bs64_ep100",
+    # )
+    # for filename in paths:
+    #     ae = torch.load("../models/" + filename)
+    #     tsne(model=ae, save=True, path="../plots/" + filename.split('/')[1] + '.png')
         # noisy = True if 'denoising' in filename else False
         # res = classification_test(ae=ae, noisy=noisy, noise_const=0.1)
         # classif_results[filename.split('/')[1]] = {'loss': res[0], 'accuracy': res[1]}
 
         # print the first reconstructions
         # ae.cpu()
-        # if noisy:
-        #     _, ts_data = get_noisy_sets(noise_const=0.1, patch_width=0)
-        # else:
-        #     _, ts_data = get_clean_sets()
-        # ts_data = ts_data.data.cpu()
-        # img = ts_data[10]
-        # fig, ax = plt.subplots(1, 2)
-        # ax[0].imshow(torch.squeeze(img))
-        # ax[0].set_title("Original image")
-        # ax[0].tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
-        # ax[1].imshow(torch.reshape(ae(torch.unsqueeze(img, 0)).data, (28, 28)))
-        # ax[1].set_title("Reconstructed image")
-        # ax[1].tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
-        # plt.tight_layout()
-        # plt.show()
+
+    with torch.no_grad():
+        ae.cpu()
+        _, ts_data = get_clean_sets()
+        ts_data = ts_data.data.cpu()
+        img = ts_data[10]
+        fig, ax = plt.subplots(1, 2)
+        ax[0].imshow(torch.squeeze(img))
+        ax[0].set_title("Original image")
+        ax[0].tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
+        ax[1].imshow(torch.reshape(ae(torch.unsqueeze(img, 0)).data, (28, 28)))
+        ax[1].set_title("Reconstructed image")
+        ax[1].tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
+        plt.tight_layout()
+        plt.show()
 
         # test_loader = torch.utils.data.DataLoader(ts_data)
         # for i, img in enumerate(test_loader):
