@@ -3,6 +3,7 @@ import random
 import torch
 from torchvision.datasets import MNIST
 
+
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 

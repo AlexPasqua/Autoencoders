@@ -38,6 +38,18 @@ def get_noisy_sets(**kwargs):
 
 
 def fit_ae(model, mode=None, tr_data=None, val_data=None, num_epochs=10, bs=32, lr=0.1, momentum=0., **kwargs):
+    """
+    Training functions for the AEs
+    :param model: model to train
+    :param mode: (str) {'basic | 'contractive' | 'denoising'}
+    :param tr_data: (optional) specific training data to use
+    :param val_data: (optional) specific validation data to use
+    :param num_epochs: (int) number of epochs
+    :param bs: (int) batch size
+    :param lr: (float) learning rate
+    :param momentum: (float) momentum coefficient
+    :return: history of training (like in Keras)
+    """
     mode_values = (None, 'basic', 'contractive', 'denoising')
     assert 0 < lr < 1 and num_epochs > 0 and bs > 0 and 0 <= momentum < 1 and mode in mode_values
 
@@ -126,6 +138,7 @@ def fit_ae(model, mode=None, tr_data=None, val_data=None, num_epochs=10, bs=32, 
 
 
 def evaluate(model, criterion, mode='basic', data=None, targets=None, bs=None, **kwargs):
+    """ Evaluate the model """
     # set the data
     if data is None:
         _, val_set = get_noisy_sets(**kwargs) if mode == 'denoising' else get_clean_sets()

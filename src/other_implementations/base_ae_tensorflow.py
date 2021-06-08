@@ -1,7 +1,5 @@
 import time
 from abc import ABC
-import matplotlib.pyplot as plt
-import numpy as np
 import tensorflow as tf
 from tensorflow.keras.datasets import mnist
 from tensorflow.keras import layers, losses, optimizers
