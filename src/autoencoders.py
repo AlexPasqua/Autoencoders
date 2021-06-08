@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 from tqdm import tqdm
 from torchsummary import summary
 from torchvision import transforms
@@ -35,7 +36,7 @@ class AbstractAutoencoder(nn.Module):
         return fit_ae(model=self, mode=mode, tr_data=tr_data, val_data=val_data, num_epochs=num_epochs, bs=bs, lr=lr,
                       momentum=momentum, **kwargs)
 
-    def manifold(self, load=None, path=None, max_iters=1000, thresh=0.02, side_len=28):
+    def show_manifold_convergence(self, load=None, path=None, max_iters=1000, thresh=0.02, side_len=28, save=False):
         if load:
             images_progression = np.load(path)
         else:
@@ -66,30 +67,29 @@ class AbstractAutoencoder(nn.Module):
                     i += 1
 
             # save sequence of images
-            serializable_progression = np.array(serializable_progression)
-            np.save(file="manifold_img_seq_2", arr=serializable_progression)
+            if save:
+                serializable_progression = np.array(serializable_progression)
+                np.save(file="manifold_img_seq", arr=serializable_progression)
 
-        images_progression = images_progression[:60]
-        import matplotlib.cm as cm
-        import matplotlib.animation as animation
-        frames = []  # for storing the generated images
-        fig = plt.figure()
-        for i in range(len(images_progression)):
-            frames.append([plt.imshow(images_progression[i], animated=True)])
-        ani = animation.ArtistAnimation(fig, frames, interval=50, blit=True, repeat_delay=1000)
-        ani.save('movie2.gif')
-        plt.show()
-        exit()
-
-        # show images progression
-        img = None
-        for i in range(len(images_progression)):
-            if img is None:
-                img = plt.imshow(images_progression[0])
-            else:
-                img.set_data(images_progression[i])
-            plt.pause(.1)
-            plt.draw()
+        if save:
+            images_progression = images_progression[:60]
+            frames = []  # for storing the generated images
+            fig = plt.figure()
+            for i in range(len(images_progression)):
+                frames.append([plt.imshow(images_progression[i], animated=True)])
+            ani = animation.ArtistAnimation(fig, frames, interval=50, blit=True, repeat_delay=1000)
+            ani.save('movie.gif')
+            plt.show()
+        else:
+            # show images progression
+            img = None
+            for i in range(len(images_progression)):
+                if img is None:
+                    img = plt.imshow(images_progression[0])
+                else:
+                    img.set_data(images_progression[i])
+                plt.pause(.1)
+                plt.draw()
 
 
 class ShallowAutoencoder(AbstractAutoencoder):

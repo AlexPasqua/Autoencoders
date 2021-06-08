@@ -117,7 +117,7 @@ if __name__ == '__main__':
     # ae = torch.load("../models/deepConvAE/deepConvAE_filts(10, 20, 50)_central100_basic__lr0.1_bs32_ep100")
     # ae = torch.load("../models/deepAE/deepAE_(784, 500, 200, 100, 10)_basic_lr0.3_bs32_ep100")
     # ae = torch.load("../models/deepAE/deepAE_(784, 500, 200, 100, 10)_contractive_lr0.1_bs32_ep100")
-    # ae.manifold(load=True, path="manifold_img_seq.npy", max_iters=100, thresh=0.0)
+    # ae.show_manifold_convergence(load=True, path="manifold_img_seq.npy", max_iters=100, thresh=0.0)
 
     ae = DeepRandomizedAutoencoder(dims=(784, 100, 100))
     # ae = DeepAutoencoder((784, 500, 200, 100))
