@@ -44,7 +44,7 @@ The "encoder half" of this model can be used for represent a compressed embeddin
 <img src="plots_and_images/randAE_struct.png" width="300">
 
 ### Convolutional autoencoders
-<img src="https://www.researchgate.net/profile/Xifeng-Guo/publication/320658590/figure/fig1/AS:614154637418504@1523437284408/The-structure-of-proposed-Convolutional-AutoEncoders-CAE-for-MNIST-In-the-middle-there.png" width="450">
+<img src="plots_and_images/convAE_struct.png" width="450">
 
 #### Architecture of Conv AE
 - **Encoder**:
